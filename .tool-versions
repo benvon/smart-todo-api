@@ -1,0 +1,6 @@
+golang 1.25.5
+golangci-lint 2.8.0
+gosec 2.22.11
+govulncheck 1.1.4
+goimports 0.40.0
+pre-commit 4.5.1
