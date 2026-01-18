@@ -54,25 +54,29 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     fi
 done
 
-# Check current migration version
+# Check current migration version (for logging only)
 echo "Checking current migration version..."
-CURRENT_VERSION=$(/app/migrate -path /app/migrations -database "$DATABASE_URL" version 2>&1 || echo "none")
-
-if echo "$CURRENT_VERSION" | grep -q "no change"; then
-    echo "Database is already at the latest version. No migrations needed."
-    exit 0
-fi
-
+CURRENT_VERSION=$(/app/migrate -path /app/migrations -database "$DATABASE_URL" version 2>&1 || echo "unknown")
 echo "Current database version: $CURRENT_VERSION"
 
-# Run migrations
+# Run migrations - migrate up is idempotent and will only run pending migrations
+# It returns exit code 0 both when migrations are applied and when there are no changes
 echo "Running migrations..."
-if /app/migrate -path /app/migrations -database "$DATABASE_URL" up; then
-    NEW_VERSION=$(/app/migrate -path /app/migrations -database "$DATABASE_URL" version 2>&1 || echo "unknown")
-    echo "Migrations completed successfully! Database version: $NEW_VERSION"
+MIGRATE_OUTPUT=$(/app/migrate -path /app/migrations -database "$DATABASE_URL" up 2>&1)
+MIGRATE_EXIT_CODE=$?
+
+if [ $MIGRATE_EXIT_CODE -eq 0 ]; then
+    # Check if migrations were applied or if we're already up to date
+    if echo "$MIGRATE_OUTPUT" | grep -qiE "(no change|already at version)"; then
+        echo "Database is already at the latest version. No migrations needed."
+    else
+        echo "$MIGRATE_OUTPUT"
+        NEW_VERSION=$(/app/migrate -path /app/migrations -database "$DATABASE_URL" version 2>&1 || echo "unknown")
+        echo "Migrations completed successfully! Database version: $NEW_VERSION"
+    fi
     exit 0
 else
-    MIGRATE_EXIT_CODE=$?
     echo "ERROR: Migration failed with exit code $MIGRATE_EXIT_CODE"
+    echo "$MIGRATE_OUTPUT"
     exit $MIGRATE_EXIT_CODE
 fi
