@@ -7,19 +7,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/benvon/ai-code-template-go/internal/config"
-	"github.com/benvon/ai-code-template-go/internal/handlers"
-)
-
-// These variables will be set at build time by goreleaser
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
+	"github.com/gorilla/mux"
+	"github.com/benvon/smart-todo/internal/config"
+	"github.com/benvon/smart-todo/internal/database"
+	"github.com/benvon/smart-todo/internal/handlers"
+	"github.com/benvon/smart-todo/internal/middleware"
+	"github.com/benvon/smart-todo/internal/services/oidc"
 )
 
 func main() {
@@ -28,36 +25,72 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+	log.Printf("Configuration loaded - FrontendURL: '%s', ServerPort: '%s'", cfg.FrontendURL, cfg.ServerPort)
 
-	// Create HTTP server
-	mux := http.NewServeMux()
+	// Connect to database
+	db, err := database.New(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
 
-	// Register handlers
-	handlers.RegisterRoutes(mux)
+	// Initialize repositories
+	todoRepo := database.NewTodoRepository(db)
+	oidcConfigRepo := database.NewOIDCConfigRepository(db)
 
-	// Add health check endpoint
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err := fmt.Fprintf(w, `{"status":"healthy","version":"%s","timestamp":"%s"}`, version, time.Now().Format(time.RFC3339))
-		if err != nil {
-			log.Printf("Failed to write health check response: %v", err)
-		}
-	})
+	// Initialize services
+	oidcProvider := oidc.NewProvider(oidcConfigRepo)
+	jwksManager := oidc.NewJWKSManager()
 
-	// Add version endpoint
-	mux.HandleFunc("/version", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err := fmt.Fprintf(w, `{"version":"%s","commit":"%s","date":"%s","builtBy":"%s"}`, version, commit, date, builtBy)
-		if err != nil {
-			log.Printf("Failed to write version response: %v", err)
-		}
-	})
+	// Initialize handlers
+	authHandler := handlers.NewAuthHandler(oidcProvider)
+	todoHandler := handlers.NewTodoHandler(todoRepo)
+	healthChecker := handlers.NewHealthChecker(db)
 
-	server := &http.Server{
-		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
-		Handler:      mux,
+	// Setup router
+	r := mux.NewRouter()
+
+	// Apply middleware (order matters - CORS should run first to handle preflight)
+	// Note: In gorilla/mux, middleware executes in reverse order of registration
+	// Middleware registered LAST executes FIRST (outermost wrapper)
+	log.Println("Setting up middleware...")
+	corsMW := middleware.CORSFromEnv(cfg.FrontendURL)
+	r.Use(corsMW) // Executes FIRST (outermost) - handles OPTIONS preflight
+	r.Use(middleware.ErrorHandler)
+	r.Use(middleware.Logging) // Executes LAST (innermost)
+	log.Println("Middleware setup complete - CORS middleware should handle all OPTIONS requests")
+
+	// Public routes
+	r.HandleFunc("/healthz", healthChecker.HealthCheck).Methods("GET")
+	r.HandleFunc("/health", healthCheck).Methods("GET") // Legacy endpoint
+	r.HandleFunc("/version", versionInfo).Methods("GET")
+
+	// OpenAPI spec (public)
+	openAPIPath := filepath.Join("api", "openapi", "openapi.yaml")
+	openAPIHandler := handlers.NewOpenAPIHandler(openAPIPath)
+	openAPIHandler.RegisterRoutes(r)
+
+	// API v1 routes
+	apiRouter := r.PathPrefix("/api/v1").Subrouter()
+
+	// Auth routes
+	authRouter := apiRouter.PathPrefix("/auth").Subrouter()
+	// Public auth routes
+	authRouter.HandleFunc("/oidc/login", authHandler.GetOIDCLogin).Methods("GET")
+	// Protected auth routes
+	protectedAuthRouter := authRouter.PathPrefix("").Subrouter()
+	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager))
+	protectedAuthRouter.HandleFunc("/me", authHandler.GetMe).Methods("GET")
+
+	// Todo routes (protected)
+	todosRouter := apiRouter.PathPrefix("/todos").Subrouter()
+	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager))
+	todoHandler.RegisterRoutes(todosRouter)
+
+	// Setup server
+	srv := &http.Server{
+		Addr:         ":" + cfg.ServerPort,
+		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -65,28 +98,38 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Starting server on port %s", cfg.Server.Port)
-		log.Printf("Version: %s (commit: %s)", version, commit)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+		log.Printf("Server starting on port %s", cfg.ServerPort)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal to gracefully shutdown the server
+	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	log.Println("Server shutting down...")
 
-	// Create a deadline for server shutdown
+	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Attempt graceful shutdown
-	if err := server.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(ctx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
 	log.Println("Server exited")
+}
+
+func healthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+}
+
+func versionInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"version":"1.0.0","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
 }
