@@ -2,8 +2,11 @@ package config
 
 import (
 	"os"
+	"sync"
 	"testing"
 )
+
+var envMutex sync.Mutex
 
 func TestLoad(t *testing.T) {
 	t.Parallel()
@@ -37,7 +40,8 @@ func TestLoad(t *testing.T) {
 		{
 			name: "missing DATABASE_URL",
 			envVars: map[string]string{
-				"SERVER_PORT": "9090",
+				"DATABASE_URL": "",
+				"SERVER_PORT":  "9090",
 			},
 			expectError: true,
 		},
@@ -45,6 +49,8 @@ func TestLoad(t *testing.T) {
 			name: "default values",
 			envVars: map[string]string{
 				"DATABASE_URL": "postgres://user:pass@localhost/db",
+				"SERVER_PORT":  "",
+				"BASE_URL":     "",
 			},
 			expectError: false,
 			validate: func(t *testing.T, cfg *Config) {
@@ -83,34 +89,53 @@ func TestLoad(t *testing.T) {
 		},
 	}
 
+	// All config-related env vars that might be modified
+	allConfigEnvVars := []string{
+		"DATABASE_URL",
+		"SERVER_PORT",
+		"BASE_URL",
+		"FRONTEND_URL",
+		"OPENAI_API_KEY",
+		"ENABLE_HSTS",
+		"OIDC_PROVIDER",
+		"REDIS_URL",
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Save original env vars
+			envMutex.Lock()
+			// Save original env vars for all config-related vars
 			originalEnv := make(map[string]string)
-			for key := range tt.envVars {
+			for _, key := range allConfigEnvVars {
 				originalEnv[key] = os.Getenv(key)
 			}
 
-			// Clear relevant env vars
+			// Clear only the env vars that this test will modify
 			for key := range tt.envVars {
-				_ = os.Unsetenv(key) // Ignore error in test cleanup
+				_ = os.Unsetenv(key) // Ignore error in test setup
 			}
 
 			// Set test env vars
 			for key, value := range tt.envVars {
-				_ = os.Setenv(key, value) // Ignore error in test setup
-			}
-
-			// Cleanup
-			defer func() {
-				for key := range tt.envVars {
-					_ = os.Unsetenv(key) // Ignore error in test cleanup
+				if value == "" {
+					_ = os.Unsetenv(key) // Ignore error in test setup
+				} else {
+					_ = os.Setenv(key, value) // Ignore error in test setup
 				}
+			}
+			envMutex.Unlock()
+
+			// Cleanup: restore original env vars
+			defer func() {
+				envMutex.Lock()
+				defer envMutex.Unlock()
 				for key, value := range originalEnv {
 					if value != "" {
 						_ = os.Setenv(key, value) // Ignore error in test cleanup
+					} else {
+						_ = os.Unsetenv(key) // Ignore error in test cleanup
 					}
 				}
 			}()
@@ -169,17 +194,26 @@ func TestGetEnv(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			envMutex.Lock()
 			// Save original value
 			original := os.Getenv(tt.key)
-			defer func() {
-				_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
-			}()
 
 			if tt.value != "" {
 				_ = os.Setenv(tt.key, tt.value) // Ignore error in test setup
 			} else {
 				_ = os.Unsetenv(tt.key) // Ignore error in test setup
 			}
+			envMutex.Unlock()
+
+			defer func() {
+				envMutex.Lock()
+				defer envMutex.Unlock()
+				if original != "" {
+					_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
+				} else {
+					_ = os.Unsetenv(tt.key) // Ignore error in test cleanup
+				}
+			}()
 
 			got := getEnv(tt.key, tt.defaultValue)
 			if got != tt.want {
@@ -240,17 +274,26 @@ func TestGetEnvBool(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			envMutex.Lock()
 			// Save original value
 			original := os.Getenv(tt.key)
-			defer func() {
-				_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
-			}()
 
 			if tt.value != "" {
 				_ = os.Setenv(tt.key, tt.value) // Ignore error in test setup
 			} else {
 				_ = os.Unsetenv(tt.key) // Ignore error in test setup
 			}
+			envMutex.Unlock()
+
+			defer func() {
+				envMutex.Lock()
+				defer envMutex.Unlock()
+				if original != "" {
+					_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
+				} else {
+					_ = os.Unsetenv(tt.key) // Ignore error in test cleanup
+				}
+			}()
 
 			got := getEnvBool(tt.key, tt.defaultValue)
 			if got != tt.want {
