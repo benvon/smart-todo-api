@@ -10,12 +10,45 @@ before:
     # - go generate ./...
 
 builds:
-  - id: "default"
-    # Binary name (will use repository name by default)
-    binary: "{{ .ProjectName }}"
+  - id: "server"
+    # Binary name for the API server
+    binary: "server"
 
-    # Entry point for the application
-    main: ./
+    # Entry point for the server application
+    main: ./cmd/server
+
+    # Target environments
+    goos:
+      - linux
+      - windows
+      - darwin
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Environment variables for the build
+    env:
+      - CGO_ENABLED=0
+
+    # Build flags
+    flags:
+      - -trimpath
+
+    # Linker flags for smaller binaries and version info
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+  - id: "configure"
+    # Binary name for the configure tool
+    binary: "configure"
+
+    # Entry point for the configure application
+    main: ./cmd/configure
 
     # Target environments
     goos:
@@ -44,11 +77,10 @@ builds:
       - -X main.builtBy=goreleaser
 
 archives:
-  - id: "default"
-
-    # Archive name template
+  - id: "server"
+    # Archive name template for server binary
     name_template: >-
-      {{ .ProjectName }}_
+      {{ .ProjectName }}-server_
       {{- .Version }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -60,6 +92,26 @@ archives:
     files:
       - README.md
       - LICENSE
+    builds:
+      - server
+
+  - id: "configure"
+    # Archive name template for configure binary
+    name_template: >-
+      {{ .ProjectName }}-configure_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+    # Files to include in archives
+    files:
+      - README.md
+      - LICENSE
+    builds:
+      - configure
 
 checksum:
   name_template: 'checksums.txt'
@@ -103,19 +155,26 @@ release:
 
     Welcome to this new release!
 
-# Docker images (optional - uncomment if you want Docker images)
+# Docker images for API server
+# Note: server.Dockerfile builds binaries itself, so GoReleaser's pre-built binaries are not used
 dockers:
   - image_templates:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}:{{ .Version }}"
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}:latest"
-    dockerfile: Dockerfile
+    dockerfile: server.Dockerfile
     use: docker
+    # The Dockerfile copies everything with COPY . ., so extra_files are optional
+    # but listed here for clarity about what's included in the build context
     extra_files:
       - go.mod
+      - go.sum
       - README.md
       - LICENSE
+      - cmd/
+      - internal/
+      - api/
+      - scripts/
     build_flag_templates:
-      - "--build-arg=BINARY_NAME={{.ProjectName}}"
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}"

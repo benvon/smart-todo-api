@@ -1,56 +1,77 @@
-version: '3.8'
-
 services:
+  migrations:
+    build:
+      context: .
+      dockerfile: server.Dockerfile
+    command: ["/app/run_migrations.sh"]
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
+    depends_on:
+      - db
+    restart: "no"
+
   app:
-    build: .
+    build: 
+      context: .
+      dockerfile: server.Dockerfile
+      args:
+        - BINARY_NAME=server
     ports:
       - "8080:8080"
-    environment:
-      - ENV=development
-      - APP_PORT=8080
-    volumes:
-      - .:/app
-      - go-mod-cache:/go/pkg/mod
-    working_dir: /app
-    command: go run main.go
-    networks:
-      - app-network
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
+      - REDIS_URL=redis://redis:6379/0
+      - SERVER_PORT=8080
+      - BASE_URL=http://localhost:8080
+      - FRONTEND_URL=http://localhost:3000
+      - OPENAI_API_KEY=
+    depends_on:
+      - db
+      - redis
+      - migrations
+    restart: unless-stopped
 
-  # Optional: Add a database service if needed
-  # db:
-  #   image: postgres:15-alpine
-  #   environment:
-  #     POSTGRES_DB: app_db
-  #     POSTGRES_USER: app_user
-  #     POSTGRES_PASSWORD: app_password
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   networks:
-  #     - app-network
-  #   restart: unless-stopped
+  web:
+    build:
+      context: .
+      dockerfile: web.Dockerfile
+    depends_on:
+      - app
+    ports:
+      - "3000:8080"
+    environment:
+      - API_BASE_URL=http://localhost:8080
+    restart: unless-stopped
 
-  # Optional: Add Redis for caching if needed
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   networks:
-  #     - app-network
-  #   restart: unless-stopped
+  db:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_DB=smarttodo
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
-  go-mod-cache:
-    driver: local
-
-networks:
-  app-network:
-    driver: bridge
+  redis-data:
