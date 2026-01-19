@@ -51,7 +51,14 @@ async function getOIDCLoginConfig() {
             }
             throw new Error(errorMessage);
         }
-        return response.json();
+        const result = await response.json();
+        // Backend returns {success: true, data: {...}, timestamp: ...}
+        // Frontend expects an object with a 'data' property containing the config
+        // Return the wrapped response so config.data.client_id works correctly
+        if (result.success && result.data) {
+            return result;
+        }
+        throw new Error('Invalid response format from server');
     } catch (error) {
         if (error instanceof TypeError && error.message.includes('fetch')) {
             throw new Error(`Network error: Unable to reach server at ${window.API_BASE_URL}. Make sure the server is running.`);

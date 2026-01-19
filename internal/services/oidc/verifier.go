@@ -30,19 +30,15 @@ func (v *Verifier) Verify(ctx context.Context, tokenString string, jwksURL strin
 		return nil, fmt.Errorf("failed to get JWKS: %w", err)
 	}
 
-	// Parse and verify token
+	// Parse and verify token signature (with basic validations: exp, iat, nbf)
 	token, err := jwt.Parse([]byte(tokenString), jwt.WithKeySet(keys), jwt.WithValidate(true))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse/verify token: %w", err)
 	}
 
-	// Verify issuer
-	iss, ok := token.Get("iss")
-	if !ok {
-		return nil, fmt.Errorf("token missing issuer claim")
-	}
-	if issStr, ok := iss.(string); !ok || issStr != v.issuer {
-		return nil, fmt.Errorf("token issuer mismatch: expected %s, got %v", v.issuer, iss)
+	// Validate issuer using library's built-in validation
+	if err := jwt.Validate(token, jwt.WithIssuer(v.issuer)); err != nil {
+		return nil, fmt.Errorf("token issuer validation failed: %w", err)
 	}
 
 	// Extract claims

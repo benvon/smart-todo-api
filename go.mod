@@ -9,6 +9,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.34.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

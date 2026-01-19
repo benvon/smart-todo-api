@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -59,6 +62,7 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 			verifier := oidc.NewVerifier(jwksManager, oidcConfig.Issuer)
 			claims, err := verifier.Verify(ctx, tokenString, *oidcConfig.JWKSUrl)
 			if err != nil {
+				log.Printf("Token verification failed: %v (issuer: %s, jwks_url: %s)", err, oidcConfig.Issuer, *oidcConfig.JWKSUrl)
 				respondError(w, http.StatusUnauthorized, "Invalid or expired token")
 				return
 			}
@@ -67,16 +71,25 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 			userRepo := database.NewUserRepository(db)
 			user, err := userRepo.GetByProviderID(ctx, claims.Sub)
 			if err != nil {
-				// User doesn't exist, create it
-				user = &models.User{
-					ID:            uuid.New(),
-					Email:         claims.Email,
-					ProviderID:    &claims.Sub,
-					Name:          &claims.Name,
-					EmailVerified: true,
-				}
-				if err := userRepo.Create(ctx, user); err != nil {
-					respondError(w, http.StatusInternalServerError, "Failed to create user")
+				// Check if this is a "not found" error vs an actual database error
+				// The repository wraps sql.ErrNoRows, so errors.Is will unwrap and check
+				if errors.Is(err, sql.ErrNoRows) {
+					// User doesn't exist, create it
+					user = &models.User{
+						ID:            uuid.New(),
+						Email:         claims.Email,
+						ProviderID:    &claims.Sub,
+						Name:          &claims.Name,
+						EmailVerified: true,
+					}
+					if err := userRepo.Create(ctx, user); err != nil {
+						respondError(w, http.StatusInternalServerError, "Failed to create user")
+						return
+					}
+				} else {
+					// Actual database error (connection failure, timeout, etc.)
+					log.Printf("Database error while fetching user: %v", err)
+					respondError(w, http.StatusInternalServerError, "Database error")
 					return
 				}
 			} else {

@@ -87,6 +87,14 @@ func main() {
 	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager))
 	todoHandler.RegisterRoutes(todosRouter)
 
+	// Catch-all OPTIONS handler for preflight requests
+	// This ensures OPTIONS requests are handled even if routes don't explicitly allow them
+	// The CORS middleware will handle setting headers before this is called
+	r.Methods("OPTIONS").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// CORS middleware should have already set headers, just return 204
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// Setup server
 	srv := &http.Server{
 		Addr:         ":" + cfg.ServerPort,
@@ -125,11 +133,15 @@ func main() {
 func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	if _, err := fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		log.Printf("Failed to write health check response: %v", err)
+	}
 }
 
 func versionInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"version":"1.0.0","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339))
+	if _, err := fmt.Fprintf(w, `{"version":"1.0.0","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		log.Printf("Failed to write version info response: %v", err)
+	}
 }

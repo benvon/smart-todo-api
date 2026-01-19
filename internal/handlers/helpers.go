@@ -34,5 +34,7 @@ func respondJSONError(w http.ResponseWriter, status int, errorType, message stri
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
 
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }

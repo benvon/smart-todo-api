@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 
 	"github.com/gorilla/mux"
+	"gopkg.in/yaml.v3"
 )
 
 // OpenAPIHandler handles OpenAPI specification requests
@@ -37,13 +39,23 @@ func (h *OpenAPIHandler) ServeYAML(w http.ResponseWriter, r *http.Request) {
 
 // ServeJSON serves the OpenAPI spec in JSON format
 func (h *OpenAPIHandler) ServeJSON(w http.ResponseWriter, r *http.Request) {
-	// For now, just serve YAML (can be converted to JSON later)
 	data, err := os.ReadFile(h.openAPIPath)
 	if err != nil {
 		http.Error(w, "OpenAPI specification not found", http.StatusNotFound)
 		return
 	}
 
+	// Parse YAML into a map
+	var yamlData map[string]any
+	if err := yaml.Unmarshal(data, &yamlData); err != nil {
+		http.Error(w, "Failed to parse OpenAPI specification", http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to JSON
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	if err := json.NewEncoder(w).Encode(yamlData); err != nil {
+		http.Error(w, "Failed to encode JSON response", http.StatusInternalServerError)
+		return
+	}
 }

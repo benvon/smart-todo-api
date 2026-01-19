@@ -111,7 +111,6 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
 	respondJSON(w, http.StatusCreated, todo)
 }
 
