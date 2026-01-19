@@ -45,13 +45,17 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(discoveryURL)
 	if err == nil && resp.StatusCode == http.StatusOK {
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				// Log error but don't fail the request
+			}
+		}()
 		var discovery struct {
 			AuthorizationEndpoint string `json:"authorization_endpoint"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&discovery); err == nil && discovery.AuthorizationEndpoint != "" {
 			authEndpoint = discovery.AuthorizationEndpoint
 		}
-		resp.Body.Close()
 	}
 
 	// Fallback: construct from issuer if discovery didn't work

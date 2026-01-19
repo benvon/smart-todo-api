@@ -1,7 +1,6 @@
 package oidc
 
 import (
-	"context"
 	"testing"
 
 	"github.com/benvon/smart-todo/internal/models"
@@ -11,9 +10,9 @@ func TestNewClient(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
+		name       string
 		oidcConfig *models.OIDCConfig
-		validate  func(*testing.T, *Client)
+		validate   func(*testing.T, *Client)
 	}{
 		{
 			name: "with client secret",
@@ -77,9 +76,9 @@ func TestClient_AuthCodeURL(t *testing.T) {
 	t.Parallel()
 
 	config := &models.OIDCConfig{
-		ClientID:     "test-client-id",
-		RedirectURI:  "http://localhost:3000/callback",
-		Issuer:       "https://auth.example.com",
+		ClientID:    "test-client-id",
+		RedirectURI: "http://localhost:3000/callback",
+		Issuer:      "https://auth.example.com",
 	}
 
 	client := NewClient(config)

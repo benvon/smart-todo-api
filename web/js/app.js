@@ -59,11 +59,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadTodos() {
     try {
         const response = await getTodos();
-        todos = response.data || [];
+        // Handle paginated response: response.data.todos contains the array
+        if (response.data && Array.isArray(response.data.todos)) {
+            todos = response.data.todos;
+        } else if (Array.isArray(response.data)) {
+            // Fallback for non-paginated response (shouldn't happen with new API)
+            todos = response.data;
+        } else {
+            todos = [];
+        }
         renderTodos();
     } catch (error) {
         console.error('Failed to load todos:', error);
-        showError('Failed to load todos. Please refresh the page.');
+        // Handle rate limiting
+        if (error.retryAfter) {
+            showError(`Too many requests. Please wait ${error.retryAfter} seconds before trying again.`);
+        } else {
+            showError(error.message || 'Failed to load todos. Please refresh the page.');
+        }
     }
 }
 
@@ -78,14 +91,29 @@ async function handleAddTodo() {
         return;
     }
     
+    // Client-side validation: max 10,000 characters (matches server validation)
+    const MAX_TODO_LENGTH = 10000;
+    if (text.length > MAX_TODO_LENGTH) {
+        showError(`Todo text cannot exceed ${MAX_TODO_LENGTH} characters. Please shorten your text.`);
+        return;
+    }
+    
     try {
         const response = await createTodo(text);
-        todos.push(response.data);
+        // Response format: {success: true, data: {...}, timestamp: ...}
+        if (response.data) {
+            todos.push(response.data);
+        }
         input.value = '';
         renderTodos();
     } catch (error) {
         console.error('Failed to create todo:', error);
-        showError('Failed to create todo. Please try again.');
+        // Handle rate limiting with retry-after info
+        if (error.retryAfter) {
+            showError(`Too many requests. Please wait ${error.retryAfter} seconds before trying again.`);
+        } else {
+            showError(error.message || 'Failed to create todo. Please try again.');
+        }
     }
 }
 
@@ -95,18 +123,25 @@ async function handleAddTodo() {
 async function handleCompleteTodo(id) {
     try {
         const response = await completeTodo(id);
+        // Response format: {success: true, data: {...}, timestamp: ...}
         const updatedTodo = response.data;
         
-        // Update in local array
-        const index = todos.findIndex(t => t.id === id);
-        if (index !== -1) {
-            todos[index] = updatedTodo;
+        if (updatedTodo) {
+            // Update in local array
+            const index = todos.findIndex(t => t.id === id);
+            if (index !== -1) {
+                todos[index] = updatedTodo;
+            }
         }
         
         renderTodos();
     } catch (error) {
         console.error('Failed to complete todo:', error);
-        showError('Failed to complete todo. Please try again.');
+        if (error.retryAfter) {
+            showError(`Too many requests. Please wait ${error.retryAfter} seconds before trying again.`);
+        } else {
+            showError(error.message || 'Failed to complete todo. Please try again.');
+        }
     }
 }
 
@@ -126,7 +161,11 @@ async function handleDeleteTodo(id) {
         renderTodos();
     } catch (error) {
         console.error('Failed to delete todo:', error);
-        showError('Failed to delete todo. Please try again.');
+        if (error.retryAfter) {
+            showError(`Too many requests. Please wait ${error.retryAfter} seconds before trying again.`);
+        } else {
+            showError(error.message || 'Failed to delete todo. Please try again.');
+        }
     }
 }
 
@@ -162,13 +201,30 @@ function renderTodoList(container, todoList) {
     todoList.forEach(todo => {
         const todoEl = document.createElement('div');
         todoEl.className = 'todo-item';
-        todoEl.innerHTML = `
-            <span class="todo-text">${escapeHtml(todo.text)}</span>
-            <div class="todo-actions">
-                <button class="btn btn-small btn-complete" onclick="handleCompleteTodo('${todo.id}')">Complete</button>
-                <button class="btn btn-small btn-delete" onclick="handleDeleteTodo('${todo.id}')">Delete</button>
-            </div>
-        `;
+        todoEl.setAttribute('data-todo-id', todo.id);
+        
+        const textSpan = document.createElement('span');
+        textSpan.className = 'todo-text';
+        textSpan.textContent = todo.text;
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'todo-actions';
+        
+        const completeBtn = document.createElement('button');
+        completeBtn.className = 'btn btn-small btn-complete';
+        completeBtn.textContent = 'Complete';
+        completeBtn.addEventListener('click', () => handleCompleteTodo(todo.id));
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn btn-small btn-delete';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', () => handleDeleteTodo(todo.id));
+        
+        actionsDiv.appendChild(completeBtn);
+        actionsDiv.appendChild(deleteBtn);
+        
+        todoEl.appendChild(textSpan);
+        todoEl.appendChild(actionsDiv);
         container.appendChild(todoEl);
     });
 }

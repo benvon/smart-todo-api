@@ -293,16 +293,26 @@ mod-tidy-check:
 build:
 	$(call print_info,Building binaries...)
 	mkdir -p $(BUILD_DIR)
-	$(call print_info,Building for Linux AMD64...)
-	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./
-	$(call print_info,Building for Linux ARM64...)
-	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./
-	$(call print_info,Building for macOS AMD64...)
-	GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./
-	$(call print_info,Building for macOS ARM64...)
-	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./
-	$(call print_info,Building for Windows AMD64...)
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./
+	$(call print_info,Building server for Linux AMD64...)
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/server-linux-amd64 ./cmd/server
+	$(call print_info,Building server for Linux ARM64...)
+	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/server-linux-arm64 ./cmd/server
+	$(call print_info,Building server for macOS AMD64...)
+	GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/server-darwin-amd64 ./cmd/server
+	$(call print_info,Building server for macOS ARM64...)
+	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/server-darwin-arm64 ./cmd/server
+	$(call print_info,Building server for Windows AMD64...)
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/server-windows-amd64.exe ./cmd/server
+	$(call print_info,Building configure for Linux AMD64...)
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/configure-linux-amd64 ./cmd/configure
+	$(call print_info,Building configure for Linux ARM64...)
+	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/configure-linux-arm64 ./cmd/configure
+	$(call print_info,Building configure for macOS AMD64...)
+	GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/configure-darwin-amd64 ./cmd/configure
+	$(call print_info,Building configure for macOS ARM64...)
+	GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/configure-darwin-arm64 ./cmd/configure
+	$(call print_info,Building configure for Windows AMD64...)
+	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/configure-windows-amd64.exe ./cmd/configure
 	$(call print_success,All builds completed!)
 	$(call print_info,Built binaries:)
 	@ls -la $(BUILD_DIR)/

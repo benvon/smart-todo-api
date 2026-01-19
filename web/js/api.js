@@ -22,7 +22,25 @@ async function apiRequest(endpoint, options = {}) {
     });
 
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Unknown error' }));
+        // Handle rate limiting (429)
+        if (response.status === 429) {
+            const retryAfter = response.headers.get('Retry-After') || '60';
+            const error = await response.json().catch(() => ({ message: 'Too Many Requests' }));
+            const rateLimitError = new Error(error.message || 'Too Many Requests. Please try again later.');
+            rateLimitError.retryAfter = parseInt(retryAfter, 10);
+            rateLimitError.status = 429;
+            throw rateLimitError;
+        }
+        
+        // Handle request size limit (413)
+        if (response.status === 413) {
+            const error = await response.json().catch(() => ({ message: 'Request Entity Too Large' }));
+            throw new Error(error.message || 'Request is too large. Please reduce the size and try again.');
+        }
+        
+        // Handle other errors
+        const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+        // Error response format: {success: false, error: "error_type", message: "error message"}
         throw new Error(error.message || `HTTP ${response.status}`);
     }
 
@@ -37,10 +55,17 @@ async function getOIDCLoginConfig() {
     try {
         const response = await fetch(url);
         if (!response.ok) {
+            // Handle rate limiting
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After') || '60';
+                throw new Error(`Too many requests. Please wait ${retryAfter} seconds before trying again.`);
+            }
+            
             const errorText = await response.text();
             let errorMessage = `Failed to get OIDC configuration (${response.status})`;
             try {
                 const errorJson = JSON.parse(errorText);
+                // Error format: {success: false, error: "error_type", message: "error message"}
                 if (errorJson.message) {
                     errorMessage = errorJson.message;
                 }
