@@ -58,6 +58,8 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
+    volumes:
+      - db-data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
@@ -75,3 +77,8 @@ services:
 
 volumes:
   redis-data:
+    driver: local
+    name: redis-data
+  db-data:
+    driver: local
+    name: db-data
