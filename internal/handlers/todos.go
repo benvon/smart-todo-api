@@ -2,14 +2,18 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/benvon/smart-todo/internal/validation"
 )
 
 // TodoHandler handles todo-related requests
@@ -33,9 +37,20 @@ func (h *TodoHandler) RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/{id}/complete", h.CompleteTodo).Methods("POST")
 }
 
+const (
+	// MaxTodoTextLength is the maximum length for todo text
+	MaxTodoTextLength = 10000
+	// MinTodoTextLength is the minimum length for todo text
+	MinTodoTextLength = 1
+	// DefaultPageSize is the default page size for pagination
+	DefaultPageSize = 100
+	// MaxPageSize is the maximum page size for pagination
+	MaxPageSize = 500
+)
+
 // CreateTodoRequest represents a create todo request
 type CreateTodoRequest struct {
-	Text string `json:"text"`
+	Text string `json:"text" validate:"required,min=1,max=10000"`
 }
 
 // UpdateTodoRequest represents an update todo request
@@ -45,7 +60,16 @@ type UpdateTodoRequest struct {
 	Status      *models.TodoStatus   `json:"status,omitempty"`
 }
 
-// ListTodos lists todos for the authenticated user
+// ListTodosResponse represents the paginated response for listing todos
+type ListTodosResponse struct {
+	Todos      []*models.Todo `json:"todos"`
+	Page       int            `json:"page"`
+	PageSize   int            `json:"page_size"`
+	Total      int            `json:"total"`
+	TotalPages int            `json:"total_pages"`
+}
+
+// ListTodos lists todos for the authenticated user with pagination
 func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r)
 	if user == nil {
@@ -54,27 +78,69 @@ func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	
-	// Parse query parameters
+
+	// Parse pagination parameters
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+
+	pageSize := DefaultPageSize
+	if ps := r.URL.Query().Get("page_size"); ps != "" {
+		if parsed, err := strconv.Atoi(ps); err == nil && parsed > 0 {
+			if parsed > MaxPageSize {
+				pageSize = MaxPageSize
+			} else {
+				pageSize = parsed
+			}
+		}
+	}
+
+	// Parse and validate query parameters
 	var timeHorizon *models.TimeHorizon
 	if th := r.URL.Query().Get("time_horizon"); th != "" {
+		if err := validation.ValidateTimeHorizon(th); err != nil {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		thEnum := models.TimeHorizon(th)
 		timeHorizon = &thEnum
 	}
 
 	var status *models.TodoStatus
 	if s := r.URL.Query().Get("status"); s != "" {
+		if err := validation.ValidateTodoStatus(s); err != nil {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		sEnum := models.TodoStatus(s)
 		status = &sEnum
 	}
 
-	todos, err := h.todoRepo.GetByUserID(ctx, user.ID, timeHorizon, status)
+	// Get todos with pagination
+	todos, total, err := h.todoRepo.GetByUserIDPaginated(ctx, user.ID, timeHorizon, status, page, pageSize)
 	if err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve todos")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, todos)
+	// Calculate total pages
+	totalPages := (total + pageSize - 1) / pageSize
+	if totalPages == 0 {
+		totalPages = 1
+	}
+
+	response := ListTodosResponse{
+		Todos:      todos,
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }
 
 // CreateTodo creates a new todo
@@ -86,13 +152,39 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req CreateTodoRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
+		// Check if error is due to request size limit
+		if maxBytesErr, ok := err.(*http.MaxBytesError); ok {
+			respondJSONError(w, http.StatusRequestEntityTooLarge, "Request Entity Too Large", fmt.Sprintf("Request body exceeds maximum size of %d bytes", maxBytesErr.Limit))
+			return
+		}
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid request body")
 		return
 	}
 
+	// Validate request
+	if err := validation.Validate.Struct(req); err != nil {
+		if validationErrors, ok := err.(validator.ValidationErrors); ok {
+			for _, fieldError := range validationErrors {
+				respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Validation failed: %s", fieldError.Error()))
+				return
+			}
+		}
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Validation failed")
+		return
+	}
+
+	// Sanitize text input
+	req.Text = validation.SanitizeText(req.Text)
 	if req.Text == "" {
-		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Text is required")
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Text is required and cannot be empty after sanitization")
+		return
+	}
+
+	// Validate length after sanitization
+	if len(req.Text) > MaxTodoTextLength {
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Text exceeds maximum length of %d characters", MaxTodoTextLength))
 		return
 	}
 
@@ -174,19 +266,45 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req UpdateTodoRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
+		// Check if error is due to request size limit
+		if maxBytesErr, ok := err.(*http.MaxBytesError); ok {
+			respondJSONError(w, http.StatusRequestEntityTooLarge, "Request Entity Too Large", fmt.Sprintf("Request body exceeds maximum size of %d bytes", maxBytesErr.Limit))
+			return
+		}
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid request body")
 		return
 	}
 
-	// Update fields if provided
+	// Update fields if provided with validation
 	if req.Text != nil {
-		todo.Text = *req.Text
+		// Sanitize text input
+		sanitized := validation.SanitizeText(*req.Text)
+		if sanitized == "" {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", "Text cannot be empty after sanitization")
+			return
+		}
+		if len(sanitized) > MaxTodoTextLength {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Text exceeds maximum length of %d characters", MaxTodoTextLength))
+			return
+		}
+		todo.Text = sanitized
 	}
 	if req.TimeHorizon != nil {
+		// Validate enum value
+		if err := validation.ValidateTimeHorizon(string(*req.TimeHorizon)); err != nil {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		todo.TimeHorizon = *req.TimeHorizon
 	}
 	if req.Status != nil {
+		// Validate enum value
+		if err := validation.ValidateTodoStatus(string(*req.Status)); err != nil {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
 		todo.Status = *req.Status
 	}
 

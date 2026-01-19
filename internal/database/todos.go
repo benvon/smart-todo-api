@@ -11,6 +11,11 @@ import (
 	"github.com/benvon/smart-todo/internal/models"
 )
 
+const (
+	// MaxPageSize is the maximum page size for pagination queries
+	MaxPageSize = 500
+)
+
 // TodoRepository handles todo database operations
 type TodoRepository struct {
 	db *DB
@@ -96,41 +101,67 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 }
 
 // GetByUserID retrieves all todos for a user, optionally filtered by time_horizon and status
+// Deprecated: Use GetByUserIDPaginated for better performance with large datasets
 func (r *TodoRepository) GetByUserID(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus) ([]*models.Todo, error) {
-	query := `
+	todos, _, err := r.GetByUserIDPaginated(ctx, userID, timeHorizon, status, 1, MaxPageSize)
+	return todos, err
+}
+
+// GetByUserIDPaginated retrieves todos for a user with pagination support
+func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error) {
+	// Build base query for counting
+	countQuery := `SELECT COUNT(*) FROM todos WHERE user_id = $1`
+	countArgs := []any{userID}
+	argIndex := 2
+
+	// Build WHERE clause for filtering
+	whereClause := "WHERE user_id = $1"
+	if timeHorizon != nil {
+		whereClause += fmt.Sprintf(" AND time_horizon = $%d", argIndex)
+		countQuery += fmt.Sprintf(" AND time_horizon = $%d", argIndex)
+		countArgs = append(countArgs, string(*timeHorizon))
+		argIndex++
+	}
+
+	if status != nil {
+		whereClause += fmt.Sprintf(" AND status = $%d", argIndex)
+		countQuery += fmt.Sprintf(" AND status = $%d", argIndex)
+		countArgs = append(countArgs, string(*status))
+		argIndex++
+	}
+
+	// Get total count
+	var total int
+	err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count todos: %w", err)
+	}
+
+	// Build main query with pagination
+	query := fmt.Sprintf(`
 		SELECT id, user_id, text, time_horizon, status, metadata, created_at, updated_at, completed_at
 		FROM todos
-		WHERE user_id = $1
-	`
-	args := []any{userID}
-	argIndex := 2
-	
-	if timeHorizon != nil {
-		query += fmt.Sprintf(" AND time_horizon = $%d", argIndex)
-		args = append(args, string(*timeHorizon))
-		argIndex++
-	}
-	
-	if status != nil {
-		query += fmt.Sprintf(" AND status = $%d", argIndex)
-		args = append(args, string(*status))
-		argIndex++
-	}
-	
-	query += " ORDER BY created_at DESC"
-	
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIndex, argIndex+1)
+
+	args := countArgs
+	offset := (page - 1) * pageSize
+	args = append(args, pageSize, offset)
+
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query todos: %w", err)
+		return nil, 0, fmt.Errorf("failed to query todos: %w", err)
 	}
 	defer rows.Close()
-	
+
 	var todos []*models.Todo
 	for rows.Next() {
 		todo := &models.Todo{}
 		var metadataJSON []byte
 		var completedAt sql.NullTime
-		
+
 		err := rows.Scan(
 			&todo.ID,
 			&todo.UserID,
@@ -143,25 +174,25 @@ func (r *TodoRepository) GetByUserID(ctx context.Context, userID uuid.UUID, time
 			&completedAt,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan todo: %w", err)
+			return nil, 0, fmt.Errorf("failed to scan todo: %w", err)
 		}
-		
+
 		if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+			return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
-		
+
 		if completedAt.Valid {
 			todo.CompletedAt = &completedAt.Time
 		}
-		
+
 		todos = append(todos, todo)
 	}
-	
+
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating todos: %w", err)
+		return nil, 0, fmt.Errorf("error iterating todos: %w", err)
 	}
-	
-	return todos, nil
+
+	return todos, total, nil
 }
 
 // Update updates an existing todo

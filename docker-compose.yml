@@ -26,12 +26,14 @@ services:
       start_period: 40s
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
+      - REDIS_URL=redis://redis:6379/0
       - SERVER_PORT=8080
       - BASE_URL=http://localhost:8080
       - FRONTEND_URL=http://localhost:3000
       - OPENAI_API_KEY=
     depends_on:
       - db
+      - redis
       - migrations
     restart: unless-stopped
 
@@ -56,3 +58,20 @@ services:
     ports:
       - "5432:5432"
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  redis-data:

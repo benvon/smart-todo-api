@@ -18,14 +18,16 @@ func NewOIDCCmd() *cobra.Command {
 	var issuer, domain, clientID, clientSecret, redirectURI string
 
 	cmd := &cobra.Command{
-		Use:   "oidc cognito",
-		Short: "Configure OIDC provider (AWS Cognito)",
-		Long:  "Configure AWS Cognito as an OIDC provider for authentication",
+		Use:   "oidc <provider-name>",
+		Short: "Configure OIDC provider",
+		Long:  "Configure an OIDC provider for authentication. Provider name can be any identifier (e.g., 'cognito', 'okta', 'auth0')",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := args[0]
-			if provider != "cognito" {
-				return fmt.Errorf("unsupported provider: %s (only 'cognito' is supported)", provider)
+			
+			// Validate provider name (basic validation - must not be empty)
+			if provider == "" {
+				return fmt.Errorf("provider name cannot be empty")
 			}
 
 			if issuer == "" || clientID == "" || redirectURI == "" {

@@ -11,11 +11,15 @@ import (
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
 	oidcProvider *oidc.Provider
+	providerName string
 }
 
 // NewAuthHandler creates a new auth handler
-func NewAuthHandler(oidcProvider *oidc.Provider) *AuthHandler {
-	return &AuthHandler{oidcProvider: oidcProvider}
+func NewAuthHandler(oidcProvider *oidc.Provider, providerName string) *AuthHandler {
+	return &AuthHandler{
+		oidcProvider: oidcProvider,
+		providerName: providerName,
+	}
 }
 
 // RegisterRoutes registers auth routes on the given router
@@ -29,10 +33,10 @@ func (h *AuthHandler) RegisterRoutes(r *mux.Router) {
 func (h *AuthHandler) GetOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	
-	// Get login config for cognito provider
-	loginConfig, err := h.oidcProvider.GetLoginConfig(ctx, "cognito")
+	// Get login config for configured provider
+	loginConfig, err := h.oidcProvider.GetLoginConfig(ctx, h.providerName)
 	if err != nil {
-		respondJSONError(w, http.StatusInternalServerError, "Failed to get OIDC configuration", err.Error())
+		respondJSONError(w, http.StatusInternalServerError, "Failed to get OIDC configuration", "OIDC configuration not available")
 		return
 	}
 

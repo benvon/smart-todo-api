@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
+)
+
+const (
+	// MaxJWKSSize is the maximum size for JWKS responses (10KB)
+	MaxJWKSSize = 10 * 1024 // 10KB
 )
 
 // JWKSCache caches JWKS keys
@@ -67,6 +73,14 @@ func (m *JWKSManager) GetJWKS(ctx context.Context, jwksURL string) (jwk.Set, err
 }
 
 func (m *JWKSManager) fetchJWKS(ctx context.Context, jwksURL string) (jwk.Set, error) {
+	// Basic URL validation - ensure it's an HTTPS URL
+	if len(jwksURL) == 0 {
+		return nil, fmt.Errorf("JWKS URL cannot be empty")
+	}
+	if !strings.HasPrefix(jwksURL, "https://") {
+		return nil, fmt.Errorf("JWKS URL must use HTTPS")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -83,9 +97,20 @@ func (m *JWKSManager) fetchJWKS(ctx context.Context, jwksURL string) (jwk.Set, e
 		return nil, fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response body size to prevent DoS attacks
+	limitedReader := io.LimitReader(resp.Body, MaxJWKSSize)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read JWKS response: %w", err)
+	}
+
+	// Check if we hit the size limit
+	if len(body) >= MaxJWKSSize {
+		// Try to read one more byte to see if there's more data
+		var extra [1]byte
+		if n, _ := resp.Body.Read(extra[:]); n > 0 {
+			return nil, fmt.Errorf("JWKS response exceeds maximum size of %d bytes", MaxJWKSSize)
+		}
 	}
 
 	keys, err := jwk.Parse(body)

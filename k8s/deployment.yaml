@@ -49,6 +49,11 @@ spec:
             configMapKeyRef:
               name: app-config
               key: FRONTEND_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL
         # Optional: Uncomment if OPENAI_API_KEY is in secret
         # - name: OPENAI_API_KEY
         #   valueFrom:
@@ -72,6 +77,8 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 3
           failureThreshold: 3
+        # Note: App depends on Redis being available for rate limiting
+        # Consider adding initContainer or adjusting readinessProbe if Redis is slow to start
         resources:
           requests:
             memory: "128Mi"

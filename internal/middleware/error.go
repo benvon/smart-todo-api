@@ -21,7 +21,8 @@ func ErrorHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("Panic recovered: %v", err)
+				// Log panic details server-side but don't expose to client
+				log.Printf("[PANIC] Recovered panic: %v path=%s method=%s", err, r.URL.Path, r.Method)
 				respondErrorJSON(w, r, http.StatusInternalServerError, "Internal Server Error", "An unexpected error occurred")
 			}
 		}()

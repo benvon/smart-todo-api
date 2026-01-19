@@ -34,6 +34,14 @@ func main() {
 	}
 	defer db.Close()
 
+	// Connect to Redis for rate limiting
+	redisLimiter, err := middleware.NewRedisRateLimiter(cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer redisLimiter.Close()
+	log.Println("Connected to Redis for rate limiting")
+
 	// Initialize repositories
 	todoRepo := database.NewTodoRepository(db)
 	oidcConfigRepo := database.NewOIDCConfigRepository(db)
@@ -43,24 +51,40 @@ func main() {
 	jwksManager := oidc.NewJWKSManager()
 
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(oidcProvider)
+	authHandler := handlers.NewAuthHandler(oidcProvider, cfg.OIDCProvider)
 	todoHandler := handlers.NewTodoHandler(todoRepo)
 	healthChecker := handlers.NewHealthChecker(db)
 
 	// Setup router
 	r := mux.NewRouter()
 
-	// Apply middleware (order matters - CORS should run first to handle preflight)
+	// Apply middleware (order matters - executed in reverse order of registration)
 	// Note: In gorilla/mux, middleware executes in reverse order of registration
 	// Middleware registered LAST executes FIRST (outermost wrapper)
 	log.Println("Setting up middleware...")
+	
+	// Outermost middleware (executes first):
+	// 1. Security headers (should be set on all responses)
+	r.Use(middleware.SecurityHeaders(cfg.EnableHSTS))
+	// 2. CORS (handles preflight requests)
 	corsMW := middleware.CORSFromEnv(cfg.FrontendURL)
-	r.Use(corsMW) // Executes FIRST (outermost) - handles OPTIONS preflight
+	r.Use(corsMW)
+	// 3. Request size limits (protects against DoS)
+	r.Use(middleware.MaxRequestSize(middleware.DefaultMaxRequestSize))
+	// 4. Content-Type validation for POST/PATCH/PUT requests
+	r.Use(middleware.ContentType)
+	// 5. Request timeout (30 seconds default)
+	r.Use(middleware.Timeout(30 * time.Second))
+	// 6. Error handler (catches panics)
 	r.Use(middleware.ErrorHandler)
-	r.Use(middleware.Logging) // Executes LAST (innermost)
-	log.Println("Middleware setup complete - CORS middleware should handle all OPTIONS requests")
+	// 7. Audit logging (for security events)
+	r.Use(middleware.Audit)
+	// 8. Logging (innermost, executes last before handler)
+	r.Use(middleware.Logging)
+	
+	log.Println("Middleware setup complete")
 
-	// Public routes
+	// Public routes (no rate limiting for health checks)
 	r.HandleFunc("/healthz", healthChecker.HealthCheck).Methods("GET")
 	r.HandleFunc("/health", healthCheck).Methods("GET") // Legacy endpoint
 	r.HandleFunc("/version", versionInfo).Methods("GET")
@@ -75,16 +99,22 @@ func main() {
 
 	// Auth routes
 	authRouter := apiRouter.PathPrefix("/auth").Subrouter()
-	// Public auth routes
-	authRouter.HandleFunc("/oidc/login", authHandler.GetOIDCLogin).Methods("GET")
+	
+	// Public auth routes with rate limiting (more restrictive for unauthenticated)
+	loginRouter := authRouter.PathPrefix("/oidc").Subrouter()
+	loginRouter.Use(middleware.RateLimitUnauthenticated(redisLimiter))
+	loginRouter.HandleFunc("/login", authHandler.GetOIDCLogin).Methods("GET")
+	
 	// Protected auth routes
 	protectedAuthRouter := authRouter.PathPrefix("").Subrouter()
-	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager))
+	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
+	protectedAuthRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
 	protectedAuthRouter.HandleFunc("/me", authHandler.GetMe).Methods("GET")
 
 	// Todo routes (protected)
 	todosRouter := apiRouter.PathPrefix("/todos").Subrouter()
-	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager))
+	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
+	todosRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
 	todoHandler.RegisterRoutes(todosRouter)
 
 	// Catch-all OPTIONS handler for preflight requests
@@ -102,6 +132,7 @@ func main() {
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
+		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
 	// Start server in a goroutine
@@ -141,6 +172,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 func versionInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	// Only expose minimal version info (sanitized for security)
 	if _, err := fmt.Fprintf(w, `{"version":"1.0.0","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		log.Printf("Failed to write version info response: %v", err)
 	}

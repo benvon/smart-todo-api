@@ -15,6 +15,29 @@ import (
 	"github.com/benvon/smart-todo/internal/services/oidc"
 )
 
+// getClientIP extracts the client IP from the request, respecting X-Forwarded-For
+func getClientIP(r *http.Request) string {
+	// Check X-Forwarded-For header (for proxies/load balancers)
+	xff := r.Header.Get("X-Forwarded-For")
+	if xff != "" {
+		// X-Forwarded-For can contain multiple IPs (comma-separated)
+		// The first one is typically the original client IP
+		ips := strings.Split(xff, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+
+	// Check X-Real-IP header (alternative header used by some proxies)
+	xri := r.Header.Get("X-Real-IP")
+	if xri != "" {
+		return strings.TrimSpace(xri)
+	}
+
+	// Fall back to RemoteAddr
+	return r.RemoteAddr
+}
+
 type contextKey string
 
 const userContextKey contextKey = "user"
@@ -28,8 +51,13 @@ func UserFromContext(r *http.Request) *models.User {
 	return user
 }
 
+const (
+	// MaxTokenSize is the maximum size for JWT tokens (8KB)
+	MaxTokenSize = 8 * 1024 // 8KB
+)
+
 // Auth creates authentication middleware that validates JWT tokens
-func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSManager) func(http.Handler) http.Handler {
+func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSManager, providerName string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -46,10 +74,18 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 
 			tokenString := parts[1]
 
-			// Get OIDC config (assuming cognito for now)
+			// Validate token length to prevent DoS attacks
+			if len(tokenString) > MaxTokenSize {
+				log.Printf("Token exceeds maximum size: %d bytes (max: %d)", len(tokenString), MaxTokenSize)
+				respondError(w, http.StatusBadRequest, "Invalid token")
+				return
+			}
+
+			// Get OIDC config using configured provider name
 			ctx := r.Context()
-			oidcConfig, err := oidcProvider.GetConfig(ctx, "cognito")
+			oidcConfig, err := oidcProvider.GetConfig(ctx, providerName)
 			if err != nil {
+				log.Printf("Failed to get OIDC config for provider '%s': %v", providerName, err)
 				respondError(w, http.StatusInternalServerError, "Failed to get OIDC configuration")
 				return
 			}
@@ -63,7 +99,9 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 			verifier := oidc.NewVerifier(jwksManager, oidcConfig.Issuer)
 			claims, err := verifier.Verify(ctx, tokenString, *oidcConfig.JWKSUrl)
 			if err != nil {
-				log.Printf("Token verification failed: %v (issuer: %s, jwks_url: %s)", err, oidcConfig.Issuer, *oidcConfig.JWKSUrl)
+				// Log detailed error server-side, but send generic message to client
+				ip := getClientIP(r)
+				log.Printf("[AUDIT] Token verification failed: ip=%s issuer=%s error=%v", ip, oidcConfig.Issuer, err)
 				respondError(w, http.StatusUnauthorized, "Invalid or expired token")
 				return
 			}

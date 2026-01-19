@@ -22,8 +22,18 @@ func NewVerifier(jwksManager *JWKSManager, issuer string) *Verifier {
 	}
 }
 
+const (
+	// MaxTokenSize is the maximum size for JWT tokens (8KB)
+	MaxTokenSize = 8 * 1024 // 8KB
+)
+
 // Verify verifies a JWT token and extracts claims
 func (v *Verifier) Verify(ctx context.Context, tokenString string, jwksURL string) (*models.JWTClaims, error) {
+	// Validate token length to prevent DoS attacks
+	if len(tokenString) > MaxTokenSize {
+		return nil, fmt.Errorf("token exceeds maximum size of %d bytes", MaxTokenSize)
+	}
+
 	// Get JWKS
 	keys, err := v.jwksManager.GetJWKS(ctx, jwksURL)
 	if err != nil {

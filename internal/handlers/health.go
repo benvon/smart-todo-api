@@ -41,7 +41,8 @@ func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		// Check database connection
 		if err := h.checkDatabase(r.Context()); err != nil {
 			response.Status = "unhealthy"
-			checks["database"] = "unhealthy: " + err.Error()
+			// Don't expose detailed error messages - just indicate unhealthy
+			checks["database"] = "unhealthy"
 		} else {
 			checks["database"] = "healthy"
 		}
@@ -60,14 +61,20 @@ func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
-		json.NewEncoder(w).Encode(response)
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			// Log error but response already started, can't send error response
+			return
+		}
 		return
 	}
 
 	// Basic mode - just return that the server is running
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		// Log error but response already started, can't send error response
+		return
+	}
 }
 
 // checkDatabase verifies the database connection

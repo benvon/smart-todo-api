@@ -57,6 +57,15 @@ func TestLoad(t *testing.T) {
 				if cfg.FrontendURL != "http://localhost:3000" {
 					t.Errorf("Expected default FrontendURL to be 'http://localhost:3000', got '%s'", cfg.FrontendURL)
 				}
+				if cfg.EnableHSTS != false {
+					t.Errorf("Expected default EnableHSTS to be false, got %v", cfg.EnableHSTS)
+				}
+				if cfg.OIDCProvider != "cognito" {
+					t.Errorf("Expected default OIDCProvider to be 'cognito', got '%s'", cfg.OIDCProvider)
+				}
+				if cfg.RedisURL != "redis://localhost:6379/0" {
+					t.Errorf("Expected default RedisURL to be 'redis://localhost:6379/0', got '%s'", cfg.RedisURL)
+				}
 			},
 		},
 		{
@@ -173,6 +182,75 @@ func TestGetEnv(t *testing.T) {
 			got := getEnv(tt.key, tt.defaultValue)
 			if got != tt.want {
 				t.Errorf("getEnv(%s, %s) = %s, want %s", tt.key, tt.defaultValue, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetEnvBool(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		key          string
+		value        string
+		defaultValue bool
+		want         bool
+	}{
+		{
+			name:         "env var set to 'true'",
+			key:          "TEST_BOOL_KEY",
+			value:        "true",
+			defaultValue: false,
+			want:         true,
+		},
+		{
+			name:         "env var set to '1'",
+			key:          "TEST_BOOL_KEY",
+			value:        "1",
+			defaultValue: false,
+			want:         true,
+		},
+		{
+			name:         "env var set to 'yes'",
+			key:          "TEST_BOOL_KEY",
+			value:        "yes",
+			defaultValue: false,
+			want:         true,
+		},
+		{
+			name:         "env var set to 'false'",
+			key:          "TEST_BOOL_KEY",
+			value:        "false",
+			defaultValue: true,
+			want:         false,
+		},
+		{
+			name:         "env var not set",
+			key:          "TEST_BOOL_KEY_NOT_SET",
+			value:        "",
+			defaultValue: false,
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Save original value
+			original := os.Getenv(tt.key)
+			defer os.Setenv(tt.key, original)
+
+			if tt.value != "" {
+				os.Setenv(tt.key, tt.value)
+			} else {
+				os.Unsetenv(tt.key)
+			}
+
+			got := getEnvBool(tt.key, tt.defaultValue)
+			if got != tt.want {
+				t.Errorf("getEnvBool(%s, %v) = %v, want %v", tt.key, tt.defaultValue, got, tt.want)
 			}
 		})
 	}
