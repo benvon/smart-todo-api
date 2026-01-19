@@ -5,8 +5,9 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify && go mod tidy && go mod vendor
 COPY . .
-RUN go build -o server ./cmd/server && \
-    go build -o configure ./cmd/configure && \
+RUN mkdir -p /app/bin && \
+    go build -o /app/bin/server-linux-amd64 ./cmd/server && \
+    go build -o /app/bin/configure-linux-amd64 ./cmd/configure && \
     GOBIN=/app go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Final stage
