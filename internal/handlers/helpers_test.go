@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -102,7 +101,9 @@ func TestRespondJSON(t *testing.T) {
 			respondJSON(w, tt.status, tt.data)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close() // Ignore error in test
+			}()
 
 			if tt.validate != nil {
 				tt.validate(t, resp)
@@ -188,7 +189,9 @@ func TestRespondJSONError(t *testing.T) {
 			respondJSONError(w, tt.status, tt.errorType, tt.message)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close() // Ignore error in test
+			}()
 
 			if tt.validate != nil {
 				tt.validate(t, resp)
@@ -205,7 +208,9 @@ func TestRespondJSONTimestamp(t *testing.T) {
 	respondJSON(w, http.StatusOK, "test")
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore error in test
+	}()
 
 	var body map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
@@ -220,16 +225,4 @@ func TestRespondJSONTimestamp(t *testing.T) {
 	if _, err := time.Parse(time.RFC3339, timestamp); err != nil {
 		t.Errorf("Timestamp '%s' is not valid RFC3339: %v", timestamp, err)
 	}
-}
-
-// Test helper to create a test request with body
-func newTestRequest(method, path string, body any) *http.Request {
-	var bodyReader *bytes.Reader
-	if body != nil {
-		bodyBytes, _ := json.Marshal(body)
-		bodyReader = bytes.NewReader(bodyBytes)
-	} else {
-		bodyReader = bytes.NewReader(nil)
-	}
-	return httptest.NewRequest(method, path, bodyReader)
 }

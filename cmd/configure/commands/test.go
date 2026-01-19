@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,7 +34,11 @@ func NewTestCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				if err := db.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to close database: %v\n", err)
+				}
+			}()
 
 			oidcRepo := database.NewOIDCConfigRepository(db)
 			ctx := context.Background()
@@ -54,7 +59,11 @@ func NewTestCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to reach discovery endpoint: %w", err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", err)
+				}
+			}()
 
 			if resp.StatusCode != http.StatusOK {
 				return fmt.Errorf("discovery endpoint returned status: %d", resp.StatusCode)
@@ -68,7 +77,11 @@ func NewTestCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("failed to reach JWKS endpoint: %w", err)
 				}
-				defer resp.Body.Close()
+				defer func() {
+					if err := resp.Body.Close(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to close response body: %v\n", err)
+					}
+				}()
 
 				if resp.StatusCode != http.StatusOK {
 					return fmt.Errorf("JWKS endpoint returned status: %d", resp.StatusCode)

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/httprate"
 	"github.com/redis/go-redis/v9"
 )
 

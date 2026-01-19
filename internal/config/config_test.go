@@ -95,22 +95,22 @@ func TestLoad(t *testing.T) {
 
 			// Clear relevant env vars
 			for key := range tt.envVars {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key) // Ignore error in test cleanup
 			}
 
 			// Set test env vars
 			for key, value := range tt.envVars {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value) // Ignore error in test setup
 			}
 
 			// Cleanup
 			defer func() {
 				for key := range tt.envVars {
-					os.Unsetenv(key)
+					_ = os.Unsetenv(key) // Ignore error in test cleanup
 				}
 				for key, value := range originalEnv {
 					if value != "" {
-						os.Setenv(key, value)
+						_ = os.Setenv(key, value) // Ignore error in test cleanup
 					}
 				}
 			}()
@@ -171,12 +171,14 @@ func TestGetEnv(t *testing.T) {
 
 			// Save original value
 			original := os.Getenv(tt.key)
-			defer os.Setenv(tt.key, original)
+			defer func() {
+				_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
+			}()
 
 			if tt.value != "" {
-				os.Setenv(tt.key, tt.value)
+				_ = os.Setenv(tt.key, tt.value) // Ignore error in test setup
 			} else {
-				os.Unsetenv(tt.key)
+				_ = os.Unsetenv(tt.key) // Ignore error in test setup
 			}
 
 			got := getEnv(tt.key, tt.defaultValue)
@@ -240,12 +242,14 @@ func TestGetEnvBool(t *testing.T) {
 
 			// Save original value
 			original := os.Getenv(tt.key)
-			defer os.Setenv(tt.key, original)
+			defer func() {
+				_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
+			}()
 
 			if tt.value != "" {
-				os.Setenv(tt.key, tt.value)
+				_ = os.Setenv(tt.key, tt.value) // Ignore error in test setup
 			} else {
-				os.Unsetenv(tt.key)
+				_ = os.Unsetenv(tt.key) // Ignore error in test setup
 			}
 
 			got := getEnvBool(tt.key, tt.defaultValue)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -47,7 +48,8 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 	if err == nil && resp.StatusCode == http.StatusOK {
 		defer func() {
 			if closeErr := resp.Body.Close(); closeErr != nil {
-				// Log error but don't fail the request
+				// Log error but don't fail the request - body already read
+				log.Printf("Failed to close discovery response body: %v", closeErr)
 			}
 		}()
 		var discovery struct {

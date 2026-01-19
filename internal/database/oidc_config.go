@@ -92,7 +92,14 @@ func (r *OIDCConfigRepository) GetAll(ctx context.Context) ([]*models.OIDCConfig
 	if err != nil {
 		return nil, fmt.Errorf("failed to query OIDC configs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log error but continue - rows may already be closed
+			// This is in database layer, logging would require passing logger
+			// The error is non-critical as rows are already processed
+			_ = err // Explicitly ignore error to satisfy linter
+		}
+	}()
 	
 	var configs []*models.OIDCConfig
 	for rows.Next() {

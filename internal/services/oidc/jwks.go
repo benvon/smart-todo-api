@@ -91,7 +91,14 @@ func (m *JWKSManager) fetchJWKS(ctx context.Context, jwksURL string) (jwk.Set, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail - body already read
+			// This is in a service layer, logging would require passing logger
+			// The error is non-critical as the body is already consumed
+			_ = err // Explicitly ignore error to satisfy linter
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)

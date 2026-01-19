@@ -18,8 +18,13 @@ func init() {
 	Validate = validator.New()
 
 	// Register custom validators for enums
-	Validate.RegisterValidation("time_horizon", validateTimeHorizon)
-	Validate.RegisterValidation("todo_status", validateTodoStatus)
+	// These should never fail in normal operation, but log if they do
+	if err := Validate.RegisterValidation("time_horizon", validateTimeHorizon); err != nil {
+		panic(fmt.Sprintf("failed to register time_horizon validator: %v", err))
+	}
+	if err := Validate.RegisterValidation("todo_status", validateTodoStatus); err != nil {
+		panic(fmt.Sprintf("failed to register todo_status validator: %v", err))
+	}
 }
 
 // validateTimeHorizon validates that a string is a valid TimeHorizon enum value

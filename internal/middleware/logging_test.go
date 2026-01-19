@@ -10,16 +10,16 @@ func TestLogging(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name         string
-		method       string
-		path         string
+		name          string
+		method        string
+		path          string
 		handlerStatus int
-		validate     func(*testing.T, *http.Response)
+		validate      func(*testing.T, *http.Response)
 	}{
 		{
-			name:         "GET request",
-			method:       "GET",
-			path:         "/test",
+			name:          "GET request",
+			method:        "GET",
+			path:          "/test",
 			handlerStatus: http.StatusOK,
 			validate: func(t *testing.T, resp *http.Response) {
 				if resp.StatusCode != http.StatusOK {
@@ -28,9 +28,9 @@ func TestLogging(t *testing.T) {
 			},
 		},
 		{
-			name:         "POST request",
-			method:       "POST",
-			path:         "/api/v1/todos",
+			name:          "POST request",
+			method:        "POST",
+			path:          "/api/v1/todos",
 			handlerStatus: http.StatusCreated,
 			validate: func(t *testing.T, resp *http.Response) {
 				if resp.StatusCode != http.StatusCreated {
@@ -39,9 +39,9 @@ func TestLogging(t *testing.T) {
 			},
 		},
 		{
-			name:         "404 request",
-			method:       "GET",
-			path:         "/notfound",
+			name:          "404 request",
+			method:        "GET",
+			path:          "/notfound",
 			handlerStatus: http.StatusNotFound,
 			validate: func(t *testing.T, resp *http.Response) {
 				if resp.StatusCode != http.StatusNotFound {
@@ -67,7 +67,9 @@ func TestLogging(t *testing.T) {
 			middleware.ServeHTTP(w, req)
 
 			resp := w.Result()
-			defer resp.Body.Close()
+			defer func() {
+				_ = resp.Body.Close() // Ignore error in test
+			}()
 
 			if tt.validate != nil {
 				tt.validate(t, resp)
@@ -81,7 +83,7 @@ func TestLoggingResponseWriter(t *testing.T) {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("test"))
+		_, _ = w.Write([]byte("test")) // Ignore error in test
 	})
 
 	middleware := Logging(handler)
@@ -92,7 +94,9 @@ func TestLoggingResponseWriter(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore error in test
+	}()
 
 	if resp.StatusCode != http.StatusCreated {
 		t.Errorf("Expected status 201, got %d", resp.StatusCode)

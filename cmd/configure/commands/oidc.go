@@ -2,9 +2,8 @@ package commands
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
+	"os"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -43,7 +42,11 @@ func NewOIDCCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				if err := db.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to close database: %v\n", err)
+				}
+			}()
 
 			oidcRepo := database.NewOIDCConfigRepository(db)
 			ctx := context.Background()
@@ -106,13 +109,4 @@ func NewOIDCCmd() *cobra.Command {
 	cmd.Flags().StringVar(&redirectURI, "redirect-uri", "", "OAuth2 redirect URI (required)")
 
 	return cmd
-}
-
-// generateState generates a random state token for OAuth2
-func generateState() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return base64.URLEncoding.EncodeToString(b), nil
 }

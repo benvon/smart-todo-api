@@ -12,7 +12,7 @@ func TestErrorHandler_NoPanic(t *testing.T) {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
+		_, _ = w.Write([]byte("OK")) // Ignore error in test
 	})
 
 	middleware := ErrorHandler(handler)
@@ -23,7 +23,9 @@ func TestErrorHandler_NoPanic(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore error in test
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status 200, got %d", resp.StatusCode)
@@ -46,7 +48,9 @@ func TestErrorHandler_PanicRecovery(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore error in test
+	}()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("Expected status 500, got %d", resp.StatusCode)
@@ -88,6 +92,7 @@ func TestErrorHandler_PanicWithNil(t *testing.T) {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var nilMap map[string]string
+		//nolint:staticcheck // SA5000: intentionally nil map to test panic recovery
 		nilMap["key"] = "value" // This will panic
 	})
 
@@ -99,7 +104,9 @@ func TestErrorHandler_PanicWithNil(t *testing.T) {
 	middleware.ServeHTTP(w, req)
 
 	resp := w.Result()
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore error in test
+	}()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("Expected status 500, got %d", resp.StatusCode)

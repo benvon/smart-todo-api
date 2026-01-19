@@ -5,8 +5,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify && go mod tidy && go mod vendor
 COPY . .
-RUN go build -o server cmd/server/main.go && \
-    go build -o configure cmd/configure/main.go && \
+RUN go build -o server ./cmd/server && \
+    go build -o configure ./cmd/configure && \
     GOBIN=/app go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 # Final stage
@@ -16,21 +16,21 @@ FROM ubuntu:24.04 AS runner
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN mkdir /app && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir /app && \
     groupadd --gid 1001 appgroup && \
     useradd --uid 1001 --gid 1001 --shell /bin/bash --home /app appuser && \
     chown -R appuser:appgroup /app
 
 
-COPY --from=builder --chown=appuser:appgroup /app/server /app/server
-COPY --from=builder --chown=appuser:appgroup /app/configure /app/configure
+COPY --from=builder --chown=appuser:appgroup /app/bin/server-linux-amd64 /app/server
+COPY --from=builder --chown=appuser:appgroup /app/bin/configure-linux-amd64 /app/configure
 COPY --from=builder --chown=appuser:appgroup /app/migrate /app/migrate
 COPY --from=builder --chown=appuser:appgroup /app/internal/database/migrations /app/migrations
 COPY --from=builder --chown=appuser:appgroup /app/api /app/api
 COPY --from=builder --chown=appuser:appgroup /app/scripts/start_server.sh /app/start_server.sh
 COPY --from=builder --chown=appuser:appgroup /app/scripts/run_migrations.sh /app/run_migrations.sh
+
 RUN chmod +x /app/start_server.sh /app/run_migrations.sh
 
 WORKDIR /app

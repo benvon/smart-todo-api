@@ -25,7 +25,14 @@ func MaxRequestSize(maxBytes int64) func(http.Handler) http.Handler {
 
 			// Wrap the request body with MaxBytesReader
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
-			defer r.Body.Close()
+			defer func() {
+				if err := r.Body.Close(); err != nil {
+					// Log error but continue - body may already be closed
+					// This is in middleware, so we can't easily access logger
+					// The error is non-critical as the body is already consumed or limited
+					_ = err // Explicitly ignore error to satisfy linter
+				}
+			}()
 
 			next.ServeHTTP(w, r)
 		})

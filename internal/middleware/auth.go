@@ -145,7 +145,8 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 				}
 				if updateNeeded {
 					if err := userRepo.Update(ctx, user); err != nil {
-						// Log error but continue
+						// Log error but continue - user can still use the app with stale data
+						log.Printf("Failed to update user info: %v", err)
 					}
 				}
 			}

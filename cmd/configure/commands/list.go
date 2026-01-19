@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/benvon/smart-todo/internal/config"
@@ -25,7 +26,11 @@ func NewListCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("failed to connect to database: %w", err)
 			}
-			defer db.Close()
+			defer func() {
+				if err := db.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to close database: %v\n", err)
+				}
+			}()
 
 			oidcRepo := database.NewOIDCConfigRepository(db)
 			ctx := context.Background()
