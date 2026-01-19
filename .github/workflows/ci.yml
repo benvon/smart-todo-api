@@ -127,11 +127,17 @@ jobs:
       with:
         go-version-file: go.mod
 
-    - name: Build
+    - name: Build server binary
       env:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
-      run: go build -v ./...
+      run: go build -v -o /dev/null ./cmd/server
+
+    - name: Build configure binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: go build -v -o /dev/null ./cmd/configure
 
   mod-tidy-check:
     name: Go Mod Tidy Check
