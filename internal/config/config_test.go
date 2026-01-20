@@ -21,6 +21,7 @@ func TestLoad(t *testing.T) {
 			name: "all required env vars set",
 			envVars: map[string]string{
 				"DATABASE_URL": "postgres://user:pass@localhost/db",
+				"RABBITMQ_URL": "amqp://guest:guest@localhost:5672/",
 				"SERVER_PORT":  "9090",
 				"BASE_URL":     "http://localhost:9090",
 			},
@@ -28,6 +29,9 @@ func TestLoad(t *testing.T) {
 			validate: func(t *testing.T, cfg *Config) {
 				if cfg.DatabaseURL != "postgres://user:pass@localhost/db" {
 					t.Errorf("Expected DatabaseURL to be 'postgres://user:pass@localhost/db', got '%s'", cfg.DatabaseURL)
+				}
+				if cfg.RabbitMQURL != "amqp://guest:guest@localhost:5672/" {
+					t.Errorf("Expected RabbitMQURL to be 'amqp://guest:guest@localhost:5672/', got '%s'", cfg.RabbitMQURL)
 				}
 				if cfg.ServerPort != "9090" {
 					t.Errorf("Expected ServerPort to be '9090', got '%s'", cfg.ServerPort)
@@ -49,6 +53,7 @@ func TestLoad(t *testing.T) {
 			name: "default values",
 			envVars: map[string]string{
 				"DATABASE_URL": "postgres://user:pass@localhost/db",
+				"RABBITMQ_URL": "amqp://guest:guest@localhost:5672/",
 				"SERVER_PORT":  "",
 				"BASE_URL":     "",
 			},
@@ -72,12 +77,16 @@ func TestLoad(t *testing.T) {
 				if cfg.RedisURL != "redis://localhost:6379/0" {
 					t.Errorf("Expected default RedisURL to be 'redis://localhost:6379/0', got '%s'", cfg.RedisURL)
 				}
+				if cfg.RabbitMQPrefetch != 1 {
+					t.Errorf("Expected default RabbitMQPrefetch to be 1, got %d", cfg.RabbitMQPrefetch)
+				}
 			},
 		},
 		{
 			name: "OPENAI_API_KEY optional",
 			envVars: map[string]string{
-				"DATABASE_URL": "postgres://user:pass@localhost/db",
+				"DATABASE_URL":  "postgres://user:pass@localhost/db",
+				"RABBITMQ_URL":  "amqp://guest:guest@localhost:5672/",
 				"OPENAI_API_KEY": "sk-test-key",
 			},
 			expectError: false,
@@ -87,11 +96,20 @@ func TestLoad(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "missing RABBITMQ_URL",
+			envVars: map[string]string{
+				"DATABASE_URL": "postgres://user:pass@localhost/db",
+				"RABBITMQ_URL": "",
+			},
+			expectError: true,
+		},
 	}
 
 	// All config-related env vars that might be modified
 	allConfigEnvVars := []string{
 		"DATABASE_URL",
+		"RABBITMQ_URL",
 		"SERVER_PORT",
 		"BASE_URL",
 		"FRONTEND_URL",
@@ -99,6 +117,10 @@ func TestLoad(t *testing.T) {
 		"ENABLE_HSTS",
 		"OIDC_PROVIDER",
 		"REDIS_URL",
+		"RABBITMQ_PREFETCH",
+		"AI_PROVIDER",
+		"AI_MODEL",
+		"AI_BASE_URL",
 	}
 
 	for _, tt := range tests {

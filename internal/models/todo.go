@@ -10,7 +10,7 @@ import (
 type TimeHorizon string
 
 const (
-	TimeHorizonNow   TimeHorizon = "now"
+	TimeHorizonNext  TimeHorizon = "next"
 	TimeHorizonSoon  TimeHorizon = "soon"
 	TimeHorizonLater TimeHorizon = "later"
 )
@@ -21,6 +21,7 @@ type TodoStatus string
 const (
 	TodoStatusPending    TodoStatus = "pending"
 	TodoStatusProcessing TodoStatus = "processing"
+	TodoStatusProcessed  TodoStatus = "processed"
 	TodoStatusCompleted  TodoStatus = "completed"
 )
 
@@ -32,6 +33,7 @@ type Todo struct {
 	TimeHorizon TimeHorizon `json:"time_horizon"`
 	Status      TodoStatus  `json:"status"`
 	Metadata    Metadata    `json:"metadata"`
+	DueDate     *time.Time  `json:"due_date,omitempty"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
 	CompletedAt *time.Time  `json:"completed_at,omitempty"`

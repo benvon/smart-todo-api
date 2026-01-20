@@ -7,7 +7,8 @@ services:
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: "no"
 
   app:
@@ -24,25 +25,71 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    env_file:
+      - .env  # Load environment variables from .env file (including OPENAI_API_KEY)
     environment:
       - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
       - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - SERVER_PORT=8080
       - BASE_URL=http://localhost:8080
       - FRONTEND_URL=http://localhost:3000
-      - OPENAI_API_KEY=
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_MODEL=${AI_MODEL:-gpt-5-mini}
+      # OPENAI_API_KEY will be loaded from .env file via env_file
+      # AI_BASE_URL is optional, defaults to https://api.openai.com/v1
+      - AI_BASE_URL=${AI_BASE_URL:-}
     depends_on:
-      - db
-      - redis
-      - migrations
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    env_file:
+      - .env  # Load environment variables from .env file (including OPENAI_API_KEY)
+    environment:
+      - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - RABBITMQ_PREFETCH=${RABBITMQ_PREFETCH:-1}  # Number of unacknowledged messages per worker (default: 1)
+      - AI_PROVIDER=${AI_PROVIDER:-openai}
+      - AI_MODEL=${AI_MODEL:-gpt-5-mini}
+      # OPENAI_API_KEY will be loaded from .env file via env_file
+      # AI_BASE_URL is optional, defaults to https://api.openai.com/v1
+      - AI_BASE_URL=${AI_BASE_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q worker || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   web:
     build:
       context: .
       dockerfile: web.Dockerfile
     depends_on:
-      - app
+      app:
+        condition: service_started
     ports:
       - "3000:8080"
     environment:
@@ -60,6 +107,12 @@ services:
     restart: unless-stopped
     volumes:
       - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d smarttodo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -75,6 +128,27 @@ services:
       timeout: 3s
       retries: 3
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./scripts/rabbitmq-entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/entrypoint.sh"]
+    command: ["rabbitmq-server"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
   redis-data:
     driver: local
@@ -82,3 +156,6 @@ volumes:
   db-data:
     driver: local
     name: db-data
+  rabbitmq-data:
+    driver: local
+    name: rabbitmq-data

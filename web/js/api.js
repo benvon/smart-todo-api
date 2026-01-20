@@ -1,12 +1,35 @@
 // API client
 
 /**
+ * Handle authentication error (no token or expired token)
+ * Redirects to login page if not already there
+ */
+function handleAuthError() {
+    removeToken();
+    // Only redirect if we're not already on the login page
+    if (!window.location.pathname.includes('index.html') && window.location.pathname !== '/') {
+        window.location.href = 'index.html';
+    }
+}
+
+/**
  * Make an authenticated API request
  */
 async function apiRequest(endpoint, options = {}) {
     const token = getToken();
     if (!token) {
-        throw new Error('No authentication token found');
+        handleAuthError();
+        const authError = new Error('No authentication token found');
+        authError.isAuthError = true;
+        throw authError;
+    }
+
+    // Check if token is expired before making the request
+    if (isTokenExpired(token)) {
+        handleAuthError();
+        const authError = new Error('Session expired. Please log in again.');
+        authError.isAuthError = true;
+        throw authError;
     }
 
     const url = `${window.API_BASE_URL}${endpoint}`;
@@ -22,6 +45,15 @@ async function apiRequest(endpoint, options = {}) {
     });
 
     if (!response.ok) {
+        // Handle unauthorized (401) - trigger re-authentication
+        if (response.status === 401) {
+            handleAuthError();
+            const error = await response.json().catch(() => ({ message: 'Unauthorized' }));
+            const authError = new Error(error.message || 'Session expired. Please log in again.');
+            authError.isAuthError = true;
+            throw authError;
+        }
+        
         // Handle rate limiting (429)
         if (response.status === 429) {
             const retryAfter = response.headers.get('Retry-After') || '60';
@@ -44,7 +76,30 @@ async function apiRequest(endpoint, options = {}) {
         throw new Error(error.message || `HTTP ${response.status}`);
     }
 
-    return response.json();
+    // Handle 204 No Content (empty response) - DELETE endpoints typically return this
+    if (response.status === 204) {
+        return { success: true, data: null };
+    }
+
+    // Check if response has content
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+        // No JSON content, return success
+        return { success: true, data: null };
+    }
+
+    // Try to parse JSON, but handle empty responses gracefully
+    const text = await response.text();
+    if (!text || text.trim() === '') {
+        return { success: true, data: null };
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        // If JSON parsing fails but response was OK, return success
+        return { success: true, data: null };
+    }
 }
 
 /**
@@ -119,10 +174,14 @@ async function getTodos(filters = {}) {
 /**
  * Create a todo
  */
-async function createTodo(text) {
+async function createTodo(text, dueDate = null) {
+    const payload = { text };
+    if (dueDate) {
+        payload.due_date = dueDate;
+    }
     return apiRequest('/api/v1/todos', {
         method: 'POST',
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(payload),
     });
 }
 
@@ -130,6 +189,10 @@ async function createTodo(text) {
  * Update a todo
  */
 async function updateTodo(id, updates) {
+    // Convert due_date to ISO string if it's a Date object
+    if (updates.due_date instanceof Date) {
+        updates.due_date = updates.due_date.toISOString();
+    }
     return apiRequest(`/api/v1/todos/${id}`, {
         method: 'PATCH',
         body: JSON.stringify(updates),
@@ -152,4 +215,43 @@ async function completeTodo(id) {
     return apiRequest(`/api/v1/todos/${id}/complete`, {
         method: 'POST',
     });
+}
+
+/**
+ * Trigger AI analysis/reprocessing for a todo
+ */
+async function analyzeTodo(id) {
+    return apiRequest(`/api/v1/todos/${id}/analyze`, {
+        method: 'POST',
+    });
+}
+
+/**
+ * Send a message to the AI chat
+ */
+async function sendChatMessage(message) {
+    return apiRequest('/api/v1/ai/chat/message', {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+    });
+}
+
+/**
+ * Check API health status
+ */
+async function checkAPIHealth() {
+    try {
+        const url = `${window.API_BASE_URL}/healthz`;
+        const response = await fetch(url, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000), // 5 second timeout
+        });
+        if (response.ok) {
+            const data = await response.json();
+            return { status: 'healthy', data };
+        }
+        return { status: 'unhealthy', error: `HTTP ${response.status}` };
+    } catch (error) {
+        return { status: 'offline', error: error.message };
+    }
 }

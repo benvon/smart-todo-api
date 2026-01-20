@@ -11,12 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/benvon/smart-todo/internal/config"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/handlers"
 	"github.com/benvon/smart-todo/internal/middleware"
+	"github.com/benvon/smart-todo/internal/queue"
+	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/benvon/smart-todo/internal/services/oidc"
+	"github.com/gorilla/mux"
 )
 
 func main() {
@@ -50,18 +52,73 @@ func main() {
 	}()
 	log.Println("Connected to Redis for rate limiting")
 
+	// Connect to RabbitMQ for job queue (required)
+	// Retry connection with exponential backoff to handle RabbitMQ startup delays
+	const maxRetries = 10
+	const initialDelay = 2 * time.Second
+	var jobQueue queue.JobQueue
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		jobQueue, err = queue.NewRabbitMQQueue(cfg.RabbitMQURL)
+		if err == nil {
+			log.Println("Connected to RabbitMQ for job queue")
+			defer func() {
+				if err := jobQueue.Close(); err != nil {
+					log.Printf("Failed to close RabbitMQ connection: %v", err)
+				}
+			}()
+			break
+		}
+
+		lastErr = err
+		delay := initialDelay * time.Duration(1<<uint(attempt)) // Exponential backoff
+		if delay > 30*time.Second {
+			delay = 30 * time.Second // Cap at 30 seconds
+		}
+		log.Printf("Failed to connect to RabbitMQ (attempt %d/%d): %v, retrying in %v...",
+			attempt+1, maxRetries, err, delay)
+		time.Sleep(delay)
+	}
+
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ after %d attempts: %v (RabbitMQ is required for AI features)", maxRetries, lastErr)
+	}
+
 	// Initialize repositories
 	todoRepo := database.NewTodoRepository(db)
 	oidcConfigRepo := database.NewOIDCConfigRepository(db)
+	contextRepo := database.NewAIContextRepository(db)
+	activityRepo := database.NewUserActivityRepository(db)
 
 	// Initialize services
 	oidcProvider := oidc.NewProvider(oidcConfigRepo)
 	jwksManager := oidc.NewJWKSManager()
 
+	// Initialize AI provider
+	aiProvider, err := createAIProvider(cfg)
+	if err != nil {
+		log.Printf("Warning: Failed to create AI provider: %v (AI features will be disabled)", err)
+		aiProvider = nil
+	}
+
+	// Initialize AI services
+	var chatService *ai.ChatService
+	var contextService *ai.ContextService
+	if aiProvider != nil {
+		chatService = ai.NewChatService(aiProvider)
+		contextService = ai.NewContextService(aiProvider, contextRepo)
+	}
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(oidcProvider, cfg.OIDCProvider)
-	todoHandler := handlers.NewTodoHandler(todoRepo)
+	todoHandler := handlers.NewTodoHandlerWithQueue(todoRepo, jobQueue)
 	healthChecker := handlers.NewHealthChecker(db)
+
+	var chatHandler *handlers.ChatHandler
+	if chatService != nil && contextService != nil {
+		chatHandler = handlers.NewChatHandler(chatService, contextService, contextRepo)
+	}
 
 	// Setup router
 	r := mux.NewRouter()
@@ -70,7 +127,7 @@ func main() {
 	// Note: In gorilla/mux, middleware executes in reverse order of registration
 	// Middleware registered LAST executes FIRST (outermost wrapper)
 	log.Println("Setting up middleware...")
-	
+
 	// Outermost middleware (executes first):
 	// 1. Security headers (should be set on all responses)
 	r.Use(middleware.SecurityHeaders(cfg.EnableHSTS))
@@ -89,7 +146,9 @@ func main() {
 	r.Use(middleware.Audit)
 	// 8. Logging (innermost, executes last before handler)
 	r.Use(middleware.Logging)
-	
+	// 9. Activity tracking (for authenticated requests)
+	r.Use(middleware.ActivityTracking(activityRepo))
+
 	log.Println("Middleware setup complete")
 
 	// Public routes (no rate limiting for health checks)
@@ -107,12 +166,12 @@ func main() {
 
 	// Auth routes
 	authRouter := apiRouter.PathPrefix("/auth").Subrouter()
-	
+
 	// Public auth routes with rate limiting (more restrictive for unauthenticated)
 	loginRouter := authRouter.PathPrefix("/oidc").Subrouter()
 	loginRouter.Use(middleware.RateLimitUnauthenticated(redisLimiter))
 	loginRouter.HandleFunc("/login", authHandler.GetOIDCLogin).Methods("GET")
-	
+
 	// Protected auth routes
 	protectedAuthRouter := authRouter.PathPrefix("").Subrouter()
 	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
@@ -125,6 +184,14 @@ func main() {
 	todosRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
 	todoHandler.RegisterRoutes(todosRouter)
 
+	// AI routes (protected)
+	if chatHandler != nil {
+		aiRouter := apiRouter.PathPrefix("/ai").Subrouter()
+		aiRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
+		aiRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
+		chatHandler.RegisterRoutes(aiRouter)
+	}
+
 	// Catch-all OPTIONS handler for preflight requests
 	// This ensures OPTIONS requests are handled even if routes don't explicitly allow them
 	// The CORS middleware will handle setting headers before this is called
@@ -135,11 +202,11 @@ func main() {
 
 	// Setup server
 	srv := &http.Server{
-		Addr:         ":" + cfg.ServerPort,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:           ":" + cfg.ServerPort,
+		Handler:        r,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
@@ -167,6 +234,31 @@ func main() {
 	}
 
 	log.Println("Server exited")
+}
+
+// createAIProvider creates an AI provider based on configuration
+func createAIProvider(cfg *config.Config) (ai.AIProvider, error) {
+	if cfg.OpenAIKey == "" {
+		return nil, fmt.Errorf("OpenAI API key not configured")
+	}
+
+	// Create provider registry
+	registry := ai.NewProviderRegistry()
+	ai.RegisterOpenAI(registry)
+
+	// Get provider config
+	providerType := cfg.AIProvider
+	if providerType == "" {
+		providerType = "openai"
+	}
+
+	config := map[string]string{
+		"api_key":  cfg.OpenAIKey,
+		"model":    cfg.AIModel,
+		"base_url": cfg.AIBaseURL,
+	}
+
+	return registry.GetProvider(providerType, config)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {

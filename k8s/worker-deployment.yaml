@@ -1,54 +1,35 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: app
+  name: worker
   namespace: smart-todo
   labels:
     app: smart-todo
-    component: api
+    component: worker
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: smart-todo
-      component: api
+      component: worker
   template:
     metadata:
       labels:
         app: smart-todo
-        component: api
+        component: worker
     spec:
       containers:
-      - name: server
+      - name: worker
         # Replace with your actual image name and tag
         image: smart-todo:latest
         imagePullPolicy: IfNotPresent
-        command: ["/app/start_server.sh"]
-        ports:
-        - containerPort: 8080
-          name: http
-          protocol: TCP
+        command: ["/app/worker"]
         env:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: app-secrets
               key: DATABASE_URL
-        - name: SERVER_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: SERVER_PORT
-        - name: BASE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: BASE_URL
-        - name: FRONTEND_URL
-          valueFrom:
-            configMapKeyRef:
-              name: app-config
-              key: FRONTEND_URL
         - name: REDIS_URL
           valueFrom:
             configMapKeyRef:
@@ -59,6 +40,12 @@ spec:
             configMapKeyRef:
               name: app-config
               key: RABBITMQ_URL
+        - name: RABBITMQ_PREFETCH
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PREFETCH
+              optional: true
         - name: AI_PROVIDER
           valueFrom:
             configMapKeyRef:
@@ -84,24 +71,6 @@ spec:
         #       name: app-secrets
         #       key: OPENAI_API_KEY
         #       optional: true
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: http
-          initialDelaySeconds: 10
-          periodSeconds: 30
-          timeoutSeconds: 5
-          failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /healthz
-            port: http
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        # Note: App depends on Redis being available for rate limiting
-        # Consider adding initContainer or adjusting readinessProbe if Redis is slow to start
         resources:
           requests:
             memory: "128Mi"
@@ -109,3 +78,23 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "ps aux | grep -v grep | grep -q worker || exit 1"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "ps aux | grep -v grep | grep -q worker || exit 1"
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3

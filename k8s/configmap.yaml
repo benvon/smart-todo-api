@@ -8,3 +8,8 @@ data:
   BASE_URL: "http://localhost:8080"
   FRONTEND_URL: "http://localhost:3000"
   REDIS_URL: "redis://redis:6379/0"
+  RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+  RABBITMQ_PREFETCH: "1"  # Number of unacknowledged messages per worker (default: 1 for fair dispatch)
+  AI_PROVIDER: "openai"
+  AI_MODEL: "gpt-5-mini"
+  AI_BASE_URL: ""

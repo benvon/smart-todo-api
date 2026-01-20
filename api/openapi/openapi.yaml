@@ -61,7 +61,7 @@ paths:
           description: Filter by time horizon
           schema:
             type: string
-            enum: [now, soon, later]
+            enum: [next, soon, later]
         - name: status
           in: query
           description: Filter by status

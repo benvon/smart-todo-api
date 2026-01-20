@@ -76,6 +76,39 @@ builds:
       - -X main.date={{.Date}}
       - -X main.builtBy=goreleaser
 
+  - id: "worker"
+    # Binary name for the worker
+    binary: "worker"
+
+    # Entry point for the worker application
+    main: ./cmd/worker
+
+    # Target environments
+    goos:
+      - linux
+      - windows
+      - darwin
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Environment variables for the build
+    env:
+      - CGO_ENABLED=0
+
+    # Build flags
+    flags:
+      - -trimpath
+
+    # Linker flags for smaller binaries and version info
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
 archives:
   - id: "server"
     # Archive name template for server binary
@@ -92,7 +125,7 @@ archives:
     files:
       - README.md
       - LICENSE
-    builds:
+    ids:
       - server
 
   - id: "configure"
@@ -110,8 +143,26 @@ archives:
     files:
       - README.md
       - LICENSE
-    builds:
+    ids:
       - configure
+
+  - id: "worker"
+    # Archive name template for worker binary
+    name_template: >-
+      {{ .ProjectName }}-worker_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+
+    # Files to include in archives
+    files:
+      - README.md
+      - LICENSE
+    ids:
+      - worker
 
 checksum:
   name_template: 'checksums.txt'
@@ -155,14 +206,12 @@ release:
 
     Welcome to this new release!
 
-# Docker images for API server
-# Note: server.Dockerfile builds binaries itself, so GoReleaser's pre-built binaries are not used
-dockers:
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}:latest"
+# Docker images (v2)
+# Note: Dockerfiles build binaries themselves, so GoReleaser's pre-built binaries are not used
+dockers_v2:
+  # Server image (includes server and configure binaries)
+  - id: server
     dockerfile: server.Dockerfile
-    use: docker
     # The Dockerfile copies everything with COPY . ., so extra_files are optional
     # but listed here for clarity about what's included in the build context
     extra_files:
@@ -174,12 +223,60 @@ dockers:
       - internal/
       - api/
       - scripts/
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-server"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-server"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
+
+  # Worker image
+  - id: worker
+    dockerfile: worker.Dockerfile
+    extra_files:
+      - go.mod
+      - go.sum
+      - README.md
+      - LICENSE
+      - cmd/
+      - internal/
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-worker"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-worker"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
+
+  # Web frontend image
+  - id: web
+    dockerfile: web.Dockerfile
+    extra_files:
+      - web/
+      - scripts/generate_config.sh
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-web"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-web"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
 
 # Homebrew tap (optional - uncomment if you want Homebrew formula)
 # brews:

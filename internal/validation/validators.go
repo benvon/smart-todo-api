@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/go-playground/validator/v10"
 )
 
 var (
@@ -31,7 +31,7 @@ func init() {
 func validateTimeHorizon(fl validator.FieldLevel) bool {
 	value := fl.Field().String()
 	switch models.TimeHorizon(value) {
-	case models.TimeHorizonNow, models.TimeHorizonSoon, models.TimeHorizonLater:
+	case models.TimeHorizonNext, models.TimeHorizonSoon, models.TimeHorizonLater:
 		return true
 	default:
 		return false
@@ -42,7 +42,7 @@ func validateTimeHorizon(fl validator.FieldLevel) bool {
 func validateTodoStatus(fl validator.FieldLevel) bool {
 	value := fl.Field().String()
 	switch models.TodoStatus(value) {
-	case models.TodoStatusPending, models.TodoStatusProcessing, models.TodoStatusCompleted:
+	case models.TodoStatusPending, models.TodoStatusProcessing, models.TodoStatusProcessed, models.TodoStatusCompleted:
 		return true
 	default:
 		return false
@@ -70,10 +70,10 @@ func SanitizeText(text string) string {
 func ValidateTimeHorizon(value string) error {
 	th := models.TimeHorizon(value)
 	switch th {
-	case models.TimeHorizonNow, models.TimeHorizonSoon, models.TimeHorizonLater:
+	case models.TimeHorizonNext, models.TimeHorizonSoon, models.TimeHorizonLater:
 		return nil
 	default:
-		return fmt.Errorf("invalid time_horizon: %s (must be 'now', 'soon', or 'later')", value)
+		return fmt.Errorf("invalid time_horizon: %s (must be 'next', 'soon', or 'later')", value)
 	}
 }
 
@@ -81,9 +81,9 @@ func ValidateTimeHorizon(value string) error {
 func ValidateTodoStatus(value string) error {
 	status := models.TodoStatus(value)
 	switch status {
-	case models.TodoStatusPending, models.TodoStatusProcessing, models.TodoStatusCompleted:
+	case models.TodoStatusPending, models.TodoStatusProcessing, models.TodoStatusProcessed, models.TodoStatusCompleted:
 		return nil
 	default:
-		return fmt.Errorf("invalid status: %s (must be 'pending', 'processing', or 'completed')", value)
+		return fmt.Errorf("invalid status: %s (must be 'pending', 'processing', 'processed', or 'completed')", value)
 	}
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,17 +14,27 @@ import (
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/validation"
 )
 
 // TodoHandler handles todo-related requests
 type TodoHandler struct {
-	todoRepo *database.TodoRepository
+	todoRepo  *database.TodoRepository
+	jobQueue  queue.JobQueue // Optional - if nil, job enqueueing is disabled
 }
 
 // NewTodoHandler creates a new todo handler
 func NewTodoHandler(todoRepo *database.TodoRepository) *TodoHandler {
 	return &TodoHandler{todoRepo: todoRepo}
+}
+
+// NewTodoHandlerWithQueue creates a new todo handler with job queue support
+func NewTodoHandlerWithQueue(todoRepo *database.TodoRepository, jobQueue queue.JobQueue) *TodoHandler {
+	return &TodoHandler{
+		todoRepo: todoRepo,
+		jobQueue: jobQueue,
+	}
 }
 
 // RegisterRoutes registers todo routes on the given router
@@ -35,6 +46,7 @@ func (h *TodoHandler) RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("/{id}", h.UpdateTodo).Methods("PATCH")
 	r.HandleFunc("/{id}", h.DeleteTodo).Methods("DELETE")
 	r.HandleFunc("/{id}/complete", h.CompleteTodo).Methods("POST")
+	r.HandleFunc("/{id}/analyze", h.AnalyzeTodo).Methods("POST")
 }
 
 const (
@@ -50,7 +62,8 @@ const (
 
 // CreateTodoRequest represents a create todo request
 type CreateTodoRequest struct {
-	Text string `json:"text" validate:"required,min=1,max=10000"`
+	Text    string  `json:"text" validate:"required,min=1,max=10000"`
+	DueDate *string `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z"
 }
 
 // UpdateTodoRequest represents an update todo request
@@ -58,6 +71,8 @@ type UpdateTodoRequest struct {
 	Text        *string              `json:"text,omitempty"`
 	TimeHorizon *models.TimeHorizon  `json:"time_horizon,omitempty"`
 	Status      *models.TodoStatus   `json:"status,omitempty"`
+	Tags        *[]string            `json:"tags,omitempty"` // User-defined tags (overrides AI tags)
+	DueDate     *string              `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
 }
 
 // ListTodosResponse represents the paginated response for listing todos
@@ -195,12 +210,38 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 		Text:        req.Text,
 		TimeHorizon: models.TimeHorizonSoon, // Default to 'soon'
 		Status:      models.TodoStatusPending,
-		Metadata:    models.Metadata{},
+		Metadata:    models.Metadata{
+			TagSources: make(map[string]models.TagSource),
+		},
+	}
+
+	// Parse due_date if provided
+	if req.DueDate != nil && *req.DueDate != "" {
+		dueDate, err := time.Parse(time.RFC3339, *req.DueDate)
+		if err != nil {
+			respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid due_date format. Expected RFC3339 format (e.g., 2024-03-15T14:30:00Z): %v", err))
+			return
+		}
+		todo.DueDate = &dueDate
 	}
 
 	if err := h.todoRepo.Create(ctx, todo); err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to create todo")
 		return
+	}
+
+	// Enqueue AI analysis job if job queue is available
+	if h.jobQueue != nil {
+		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
+		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
+			// Log error but don't fail the request
+			// The todo was created successfully, analysis can be retried later
+			log.Printf("Failed to enqueue AI analysis job for todo %s (user %s): %v", todo.ID, user.ID, err)
+		} else {
+			log.Printf("Enqueued AI analysis job for todo %s (user %s)", todo.ID, user.ID)
+		}
+	} else {
+		log.Printf("Job queue not available - skipping AI analysis job for todo %s (user %s)", todo.ID, user.ID)
 	}
 
 	respondJSON(w, http.StatusCreated, todo)
@@ -277,6 +318,11 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Initialize tag sources if nil
+	if todo.Metadata.TagSources == nil {
+		todo.Metadata.TagSources = make(map[string]models.TagSource)
+	}
+
 	// Update fields if provided with validation
 	if req.Text != nil {
 		// Sanitize text input
@@ -297,6 +343,7 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
+		// User explicitly setting time horizon - mark as user override
 		todo.TimeHorizon = *req.TimeHorizon
 	}
 	if req.Status != nil {
@@ -306,6 +353,24 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		todo.Status = *req.Status
+	}
+	if req.Tags != nil {
+		// User explicitly setting tags - mark all as user-defined
+		// This overrides any AI-generated tags
+		todo.Metadata.SetUserTags(*req.Tags)
+	}
+	if req.DueDate != nil {
+		// Empty string means clear the due date
+		if *req.DueDate == "" {
+			todo.DueDate = nil
+		} else {
+			dueDate, err := time.Parse(time.RFC3339, *req.DueDate)
+			if err != nil {
+				respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid due_date format. Expected RFC3339 format (e.g., 2024-03-15T14:30:00Z): %v", err))
+				return
+			}
+			todo.DueDate = &dueDate
+		}
 	}
 
 	if err := h.todoRepo.Update(ctx, todo); err != nil {
@@ -391,4 +456,54 @@ func (h *TodoHandler) CompleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondJSON(w, http.StatusOK, todo)
+}
+
+// AnalyzeTodo manually triggers AI analysis for a todo
+func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r)
+	if user == nil {
+		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
+		return
+	}
+
+	vars := mux.Vars(r)
+	id, err := uuid.Parse(vars["id"])
+	if err != nil {
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid todo ID")
+		return
+	}
+
+	ctx := r.Context()
+	todo, err := h.todoRepo.GetByID(ctx, id)
+	if err != nil {
+		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
+		return
+	}
+
+	// Verify todo belongs to user
+	if todo.UserID != user.ID {
+		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
+		return
+	}
+
+	// Enqueue AI analysis job if job queue is available
+	if h.jobQueue != nil {
+		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
+		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
+			log.Printf("Failed to enqueue AI analysis job for todo %s (user %s): %v", todo.ID, user.ID, err)
+			respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to enqueue analysis job")
+			return
+		}
+		
+		log.Printf("Enqueued AI analysis job for todo %s (user %s) via manual trigger", todo.ID, user.ID)
+		respondJSON(w, http.StatusAccepted, map[string]string{
+			"message": "Analysis job enqueued",
+			"todo_id": todo.ID.String(),
+		})
+		return
+	}
+
+	// Job queue not available
+	log.Printf("Job queue not available - AI analysis requested for todo %s (user %s)", todo.ID, user.ID)
+	respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "AI analysis is not available")
 }

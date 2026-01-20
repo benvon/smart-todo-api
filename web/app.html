@@ -11,11 +11,18 @@
     <div class="app-container">
         <header>
             <h1>Smart Todo</h1>
-            <button id="logout-button" class="btn btn-secondary">Logout</button>
+            <div class="header-actions">
+                <div id="api-status" class="api-status">
+                    <span class="api-status-indicator" id="api-status-indicator"></span>
+                    <span class="api-status-text" id="api-status-text">Checking...</span>
+                </div>
+                <button id="logout-button" class="btn btn-secondary">Logout</button>
+            </div>
         </header>
         
         <div class="todo-input-section">
             <input type="text" id="todo-input" placeholder="Add a new todo..." class="todo-input">
+            <input type="text" id="due-date-input" placeholder="Due date (e.g., tomorrow at 3pm, next Friday)" class="todo-input due-date-input">
             <button id="add-todo-button" class="btn btn-primary">Add</button>
         </div>
         
@@ -23,8 +30,8 @@
         
         <div class="todos-container">
             <div class="todo-column">
-                <h2>Now</h2>
-                <div id="todos-now" class="todo-list"></div>
+                <h2>Next</h2>
+                <div id="todos-next" class="todo-list"></div>
             </div>
             <div class="todo-column">
                 <h2>Soon</h2>
@@ -35,12 +42,26 @@
                 <div id="todos-later" class="todo-list"></div>
             </div>
         </div>
+        
+        <div class="chat-section">
+            <div class="chat-header">
+                <h2>AI Assistant</h2>
+                <span class="chat-subtitle">Get help with your todos and preferences</span>
+            </div>
+            <div id="chat-messages" class="chat-messages"></div>
+            <div class="chat-input-section">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Ask me about your todos..." />
+                <button id="chat-send-button" class="btn btn-primary">Send</button>
+            </div>
+        </div>
     </div>
     
     <script src="js/config.js"></script>
     <script src="js/jwt.js"></script>
+    <script src="js/dateutils.js"></script>
     <script src="js/api.js"></script>
     <script src="js/auth.js"></script>
+    <script src="js/chat.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

@@ -29,14 +29,19 @@ func NewTodoRepository(db *DB) *TodoRepository {
 // Create creates a new todo
 func (r *TodoRepository) Create(ctx context.Context, todo *models.Todo) error {
 	query := `
-		INSERT INTO todos (id, user_id, text, time_horizon, status, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO todos (id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING created_at, updated_at
 	`
 	
 	metadataJSON, err := json.Marshal(todo.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	
+	var dueDate sql.NullTime
+	if todo.DueDate != nil {
+		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
 	}
 	
 	now := time.Now()
@@ -47,6 +52,7 @@ func (r *TodoRepository) Create(ctx context.Context, todo *models.Todo) error {
 		todo.TimeHorizon,
 		todo.Status,
 		metadataJSON,
+		dueDate,
 		now,
 		now,
 	).Scan(&todo.CreatedAt, &todo.UpdatedAt)
@@ -63,9 +69,10 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 	todo := &models.Todo{}
 	var metadataJSON []byte
 	var completedAt sql.NullTime
+	var dueDate sql.NullTime
 	
 	query := `
-		SELECT id, user_id, text, time_horizon, status, metadata, created_at, updated_at, completed_at
+		SELECT id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at, completed_at
 		FROM todos
 		WHERE id = $1
 	`
@@ -77,6 +84,7 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 		&todo.TimeHorizon,
 		&todo.Status,
 		&metadataJSON,
+		&dueDate,
 		&todo.CreatedAt,
 		&todo.UpdatedAt,
 		&completedAt,
@@ -91,6 +99,15 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 	
 	if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+	
+	// Initialize TagSources if nil
+	if todo.Metadata.TagSources == nil {
+		todo.Metadata.TagSources = make(map[string]models.TagSource)
+	}
+	
+	if dueDate.Valid {
+		todo.DueDate = &dueDate.Time
 	}
 	
 	if completedAt.Valid {
@@ -139,7 +156,7 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 
 	// Build main query with pagination
 	query := fmt.Sprintf(`
-		SELECT id, user_id, text, time_horizon, status, metadata, created_at, updated_at, completed_at
+		SELECT id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at, completed_at
 		FROM todos
 		%s
 		ORDER BY created_at DESC
@@ -168,6 +185,7 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 		todo := &models.Todo{}
 		var metadataJSON []byte
 		var completedAt sql.NullTime
+		var dueDate sql.NullTime
 
 		err := rows.Scan(
 			&todo.ID,
@@ -176,6 +194,7 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 			&todo.TimeHorizon,
 			&todo.Status,
 			&metadataJSON,
+			&dueDate,
 			&todo.CreatedAt,
 			&todo.UpdatedAt,
 			&completedAt,
@@ -186,6 +205,15 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 
 		if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
 			return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+		
+		// Initialize TagSources if nil
+		if todo.Metadata.TagSources == nil {
+			todo.Metadata.TagSources = make(map[string]models.TagSource)
+		}
+
+		if dueDate.Valid {
+			todo.DueDate = &dueDate.Time
 		}
 
 		if completedAt.Valid {
@@ -206,7 +234,7 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 	query := `
 		UPDATE todos
-		SET text = $2, time_horizon = $3, status = $4, metadata = $5, updated_at = $6, completed_at = $7
+		SET text = $2, time_horizon = $3, status = $4, metadata = $5, due_date = $6, updated_at = $7, completed_at = $8
 		WHERE id = $1
 		RETURNING updated_at
 	`
@@ -214,6 +242,11 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 	metadataJSON, err := json.Marshal(todo.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	
+	var dueDate sql.NullTime
+	if todo.DueDate != nil {
+		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
 	}
 	
 	var completedAt sql.NullTime
@@ -228,6 +261,7 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 		todo.TimeHorizon,
 		todo.Status,
 		metadataJSON,
+		dueDate,
 		now,
 		completedAt,
 	).Scan(&todo.UpdatedAt)

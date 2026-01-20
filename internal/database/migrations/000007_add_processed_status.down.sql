@@ -1,0 +1,12 @@
+-- Note: PostgreSQL doesn't support removing enum values once they're added
+-- This migration cannot be fully reversed
+-- If needed, the 'processed' status can be ignored in application code
+-- or the enum can be recreated from scratch in a later migration
+-- 
+-- To fully remove 'processed', you would need to:
+-- 1. Create a new enum type without 'processed'
+-- 2. Update all todos with 'processed' status to another status
+-- 3. Alter the column to use the new enum type
+-- 4. Drop the old enum type
+--
+-- For now, this is a no-op migration since we can't remove enum values
