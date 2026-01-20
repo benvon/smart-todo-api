@@ -33,7 +33,7 @@ func NewChatHandler(chatService *ai.ChatService, contextService *ai.ContextServi
 
 // RegisterRoutes registers chat routes
 func (h *ChatHandler) RegisterRoutes(r *mux.Router) {
-	r.HandleFunc("/chat", h.StartChat).Methods("POST")
+	r.HandleFunc("/chat", h.StartChat).Methods("GET")
 	r.HandleFunc("/chat/message", h.SendMessage).Methods("POST")
 }
 
