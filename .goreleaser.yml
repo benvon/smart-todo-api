@@ -211,7 +211,6 @@ release:
 dockers_v2:
   # Server image (includes server and configure binaries)
   - dockerfile: server.Dockerfile
-    use: docker
     # The Dockerfile copies everything with COPY . ., so extra_files are optional
     # but listed here for clarity about what's included in the build context
     extra_files:
@@ -230,15 +229,14 @@ dockers_v2:
       - latest
     platforms:
       - linux/amd64
-    build_flag_templates:
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}-server"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-server"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
 
   # Worker image
   - dockerfile: worker.Dockerfile
-    use: docker
     extra_files:
       - go.mod
       - go.sum
@@ -253,15 +251,14 @@ dockers_v2:
       - latest
     platforms:
       - linux/amd64
-    build_flag_templates:
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}-worker"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-worker"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
 
   # Web frontend image
   - dockerfile: web.Dockerfile
-    use: docker
     extra_files:
       - web/
       - scripts/generate_config.sh
@@ -272,11 +269,11 @@ dockers_v2:
       - latest
     platforms:
       - linux/amd64
-    build_flag_templates:
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}-web"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-web"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
 
 # Homebrew tap (optional - uncomment if you want Homebrew formula)
 # brews:
