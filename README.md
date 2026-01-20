@@ -1,10 +1,18 @@
 # Smart Todo - LLM-Integrated Todo List Manager
 
-A simple yet powerful todo list manager with a Go REST API backend, PostgreSQL database, static web frontend, and future OpenAI integration for smart categorization and metadata tagging.
+A simple yet powerful todo list manager with a Go REST API backend, PostgreSQL database, static web frontend, and OpenAI integration for smart categorization and metadata tagging.
 
 ## Overview
 
-Smart Todo is designed to be simple and intuitive, allowing users to quickly input todo items while the backend handles categorization and metadata. The application uses OIDC authentication (currently supporting AWS Cognito) and provides a clean three-column interface organizing todos by time horizon: Now, Soon, and Later.
+Smart Todo is designed to be simple and intuitive, allowing users to quickly input todo items while the backend handles categorization and metadata using AI. The application uses OIDC authentication (currently supporting AWS Cognito) and provides a clean three-column interface organizing todos by time horizon: Next, Soon, and Later.
+
+### AI Features
+
+- **Automatic Task Analysis**: Tasks are automatically analyzed by AI to extract category tags and assign time horizons
+- **Interactive AI Chat**: Users can chat with the AI to provide context and preferences for task categorization
+- **Tag Management**: AI-generated tags with user override capability - user-defined tags always take precedence
+- **Smart Reprocessing**: Automatic re-analysis of tasks (2x daily) to update time horizons as priorities change
+- **Activity-Based Pausing**: Reprocessing pauses after 3 days of inactivity and resumes on user login
 
 ## Architecture
 
@@ -19,9 +27,11 @@ Smart Todo is designed to be simple and intuitive, allowing users to quickly inp
 - **Go 1.23+** - [Install Go](https://go.dev/doc/install)
 - **PostgreSQL 12+** - [Install PostgreSQL](https://www.postgresql.org/download/)
 - **Redis 7+** - [Install Redis](https://redis.io/download) - Required for rate limiting
+- **RabbitMQ 3.12+** - [Install RabbitMQ](https://www.rabbitmq.com/download.html) - Required for job queueing (with delayed message exchange plugin)
 - **Node.js** (optional, for frontend build tooling if needed)
 - **golang-migrate** - Database migration tool: [Install migrate](https://github.com/golang-migrate/migrate)
 - **AWS Cognito** (or other OIDC provider) - For authentication
+- **OpenAI API Key** - For AI features (optional, but required for AI functionality)
 
 ## Dependencies
 
@@ -29,6 +39,7 @@ This project uses the following key dependencies:
 
 - **github.com/go-chi/httprate** - Rate limiting middleware interface
 - **github.com/redis/go-redis/v9** - Redis client for distributed rate limiting
+- **github.com/rabbitmq/amqp091-go** - RabbitMQ client for job queueing
 - **github.com/go-playground/validator/v10** - Input validation library
 - **github.com/lestrrat-go/jwx/v2** - JWT token verification
 - **github.com/gorilla/mux** - HTTP router
@@ -71,21 +82,43 @@ export DATABASE_URL="postgres://user:password@localhost/smarttodo?sslmode=disabl
 migrate -path internal/database/migrations -database "$DATABASE_URL" up
 ```
 
-### 6. Configure Environment Variables
+### 6. Set Up RabbitMQ
+
+RabbitMQ is required for the job queueing system. Install and enable the delayed message exchange plugin:
+
+```bash
+# Install RabbitMQ (macOS)
+brew install rabbitmq
+
+# Start RabbitMQ
+brew services start rabbitmq
+
+# Enable delayed message exchange plugin
+rabbitmq-plugins enable rabbitmq_delayed_message_exchange
+```
+
+For Docker deployment, see the `docker-compose.yml` file which includes RabbitMQ configuration.
+
+### 7. Configure Environment Variables
 
 Create a `.env` file or set environment variables:
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost/smarttodo?sslmode=disable"
 export REDIS_URL="redis://localhost:6379/0"  # Required for rate limiting
+export RABBITMQ_URL="amqp://guest:guest@localhost:5672/"  # Required for job queueing
 export SERVER_PORT="8080"
 export BASE_URL="http://localhost:8080"
 export FRONTEND_URL="http://localhost:3000"
-export OPENAI_API_KEY=""  # For Phase 2
+export OPENAI_API_KEY=""  # Required for AI features
+export AI_PROVIDER="openai"  # AI provider to use (default: openai)
+export AI_MODEL="gpt-4o-mini"  # AI model to use (default: gpt-4o-mini)
 # Security settings (optional for local development)
 # export ENABLE_HSTS="false"  # Don't set HSTS for local HTTP development
 # export OIDC_PROVIDER="cognito"  # Default provider name
 ```
+
+**Note**: AI features are optional. If `OPENAI_API_KEY` is not set, AI functionality will be disabled but the server will still run for basic todo management.
 
 ### 7. Configure OIDC (AWS Cognito or Other Provider)
 
@@ -123,7 +156,7 @@ go build -o bin/smart-todo-configure ./cmd/configure
 
 **Note**: The provider name used in the `oidc <provider-name>` command should match the `OIDC_PROVIDER` environment variable (defaults to `cognito`). You can configure multiple providers, but only one will be active at a time based on the `OIDC_PROVIDER` setting.
 
-### 8. Build and Run the Backend
+### 9. Build and Run the Backend
 
 ```bash
 # Build the server
@@ -138,7 +171,30 @@ go run ./cmd/server
 
 The API will be available at `http://localhost:8080`
 
-### 8. Set Up and Run the Frontend
+### 10. Run the Worker Process
+
+The worker process handles AI task analysis and reprocessing jobs:
+
+```bash
+# Build the worker
+go build -o bin/smart-todo-worker ./cmd/worker
+
+# Run the worker
+./bin/smart-todo-worker
+
+# Or run directly
+go run ./cmd/worker
+```
+
+The worker:
+- Processes AI analysis jobs for new and updated todos
+- Schedules and executes reprocessing jobs (2x daily)
+- Monitors user activity to pause/resume reprocessing
+- Performs garbage collection on expired jobs
+
+**Note**: The worker should run as a separate process or service. Multiple worker instances can run for horizontal scaling.
+
+### 11. Set Up and Run the Frontend
 
 The frontend is a static web application that can be served by any static file server.
 
@@ -183,6 +239,8 @@ smart-todo/
 ├── cmd/
 │   ├── server/              # API Backend entry point
 │   │   └── main.go
+│   ├── worker/              # Worker process entry point
+│   │   └── main.go
 │   └── configure/           # CLI Configuration Tool
 │       ├── main.go
 │       └── commands/
@@ -196,30 +254,50 @@ smart-todo/
 │   │   ├── migrations/      # Database migrations
 │   │   ├── users.go
 │   │   ├── todos.go
-│   │   └── oidc_config.go
+│   │   ├── oidc_config.go
+│   │   ├── ai_context.go    # AI context storage
+│   │   └── user_activity.go # User activity tracking
 │   ├── models/              # Data models
 │   │   ├── user.go
 │   │   ├── todo.go
 │   │   ├── metadata.go
+│   │   ├── metadata_helper.go # Tag management helpers
 │   │   ├── oidc_config.go
-│   │   └── jwt.go
+│   │   ├── ai_context.go    # AI context models
+│   │   ├── jwt.go
+│   │   └── user.go
 │   ├── handlers/            # HTTP request handlers
 │   │   ├── auth.go
 │   │   ├── todos.go
+│   │   ├── chat.go          # AI chat handler (SSE)
 │   │   ├── health.go
 │   │   ├── openapi.go
 │   │   └── helpers.go
 │   ├── middleware/          # HTTP middleware
 │   │   ├── auth.go          # JWT authentication
+│   │   ├── activity.go      # Activity tracking
 │   │   ├── cors.go
 │   │   ├── logging.go
 │   │   └── error.go
-│   └── services/            # Business logic services
-│       └── oidc/            # OIDC service
-│           ├── provider.go
-│           ├── jwks.go
-│           ├── verifier.go
-│           └── client.go
+│   ├── services/            # Business logic services
+│   │   ├── oidc/            # OIDC service
+│   │   │   ├── provider.go
+│   │   │   ├── jwks.go
+│   │   │   ├── verifier.go
+│   │   │   └── client.go
+│   │   └── ai/              # AI service
+│   │       ├── provider.go  # AI provider interface
+│   │       ├── openai.go    # OpenAI implementation
+│   │       ├── chat.go      # Chat service
+│   │       └── context.go   # Context service
+│   ├── queue/               # Job queue system
+│   │   ├── interface.go     # Queue interface
+│   │   ├── rabbitmq.go      # RabbitMQ implementation
+│   │   ├── job.go           # Job definitions
+│   │   └── gc.go            # Garbage collection
+│   └── workers/             # Worker processes
+│       ├── analyzer.go      # Task analyzer
+│       └── reprocessor.go   # Reprocessing scheduler
 ├── api/
 │   └── openapi/
 │       └── openapi.yaml     # OpenAPI 3.0 specification
@@ -256,11 +334,19 @@ smart-todo/
 
 - `GET /api/v1/auth/me` - Get current user info
 - `GET /api/v1/todos` - List todos (filterable by `time_horizon` and `status`, supports pagination with `page` and `page_size` query params)
-- `POST /api/v1/todos` - Create todo
+- `POST /api/v1/todos` - Create todo (automatically queues AI analysis job)
 - `GET /api/v1/todos/:id` - Get todo by ID
-- `PATCH /api/v1/todos/:id` - Update todo
+- `PATCH /api/v1/todos/:id` - Update todo (supports tag management)
 - `DELETE /api/v1/todos/:id` - Delete todo
 - `POST /api/v1/todos/:id/complete` - Mark todo as completed
+- `POST /api/v1/todos/:id/analyze` - Manually trigger AI analysis (returns 202 Accepted)
+- `GET /api/v1/ai/chat` - Start AI chat session (Server-Sent Events)
+- `POST /api/v1/ai/chat` - Send message in AI chat session
+
+**Note**: 
+- Time horizon values are: `next`, `soon`, `later` (changed from `now`, `soon`, `later`)
+- Tags can be managed via the `tags` field in todo update requests
+- AI chat uses Server-Sent Events (SSE) for real-time streaming responses
 
 See [OpenAPI specification](api/openapi/openapi.yaml) for complete API documentation.
 
@@ -372,18 +458,27 @@ migrate -path internal/database/migrations -database "$DATABASE_URL" version
 |----------|-------------|---------|----------|
 | `DATABASE_URL` | PostgreSQL connection string | - | Yes |
 | `REDIS_URL` | Redis connection URL for rate limiting | `redis://localhost:6379/0` | No (has default) |
+| `RABBITMQ_URL` | RabbitMQ connection URL for job queueing | - | Yes (if using AI features) |
 | `SERVER_PORT` | Server port | `8080` | No |
 | `BASE_URL` | Base URL for the API | `http://localhost:8080` | No |
 | `FRONTEND_URL` | Frontend URL for CORS | `http://localhost:3000` | No |
-| `OPENAI_API_KEY` | OpenAI API key (Phase 2) | - | No |
+| `OPENAI_API_KEY` | OpenAI API key | - | No (required for AI features) |
+| `AI_PROVIDER` | AI provider to use (`openai`) | `openai` | No |
+| `AI_MODEL` | AI model to use | `gpt-4o-mini` | No |
+| `AI_BASE_URL` | AI API base URL (for custom endpoints) | - | No |
 | `ENABLE_HSTS` | Enable HSTS header (production only, requires HTTPS) | `false` | No |
 | `OIDC_PROVIDER` | OIDC provider name to use | `cognito` | No |
 | `DEBUG` | Enable debug logging (includes verbose CORS logs) | `false` | No |
 
-**Note**: Redis is required for rate limiting. The server will fail to start if Redis is unavailable. Redis connection URL format:
-- `redis://localhost:6379/0` (local, no password)
-- `redis://:password@host:6379/0` (with password)
-- `redis://user:password@host:6379/0` (with username and password)
+**Note**: 
+- Redis is required for rate limiting. The server will fail to start if Redis is unavailable. Redis connection URL format:
+  - `redis://localhost:6379/0` (local, no password)
+  - `redis://:password@host:6379/0` (with password)
+  - `redis://user:password@host:6379/0` (with username and password)
+- RabbitMQ is required for AI features (job queueing). The server will run without it, but AI features will be disabled. RabbitMQ connection URL format:
+  - `amqp://guest:guest@localhost:5672/` (default local)
+  - `amqp://user:password@host:5672/vhost` (with credentials and vhost)
+- AI features require both `OPENAI_API_KEY` and `RABBITMQ_URL` to be set. Without these, basic todo management still works.
 
 ### Frontend Configuration (`web/config.json`)
 
@@ -556,16 +651,65 @@ The frontend is a static Progressive Web App that can be deployed to:
 
 ### Docker Deployment
 
+The project includes Docker Compose for local development with all required services:
+
+**Important**: Before running Docker Compose, create a `.env` file with your configuration:
+
+```bash
+# Copy the example .env file
+cp .env.example .env
+
+# Edit .env and set your OpenAI API key
+# OPENAI_API_KEY=your-actual-api-key-here
+```
+
+The `.env` file is gitignored and contains sensitive information like your OpenAI API key.
+
+```bash
+# Start all services (PostgreSQL, Redis, RabbitMQ, Server, Worker, Web)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# View logs for specific service
+docker-compose logs -f worker
+docker-compose logs -f app
+
+# Stop all services
+docker-compose down
+```
+
+**Note**: The `.env` file is used by both the `app` and `worker` services to securely pass the OpenAI API key and other configuration. Make sure to never commit the `.env` file to version control.
+
+For production deployment:
+
 ```bash
 # Build backend Docker image
 docker build -f server.Dockerfile -t smart-todo-server .
 
+# Build worker Docker image
+docker build -f worker.Dockerfile -t smart-todo-worker .
+
 # Run backend container
 docker run -p 8080:8080 \
   -e DATABASE_URL="postgres://..." \
+  -e REDIS_URL="redis://..." \
+  -e RABBITMQ_URL="amqp://..." \
+  -e OPENAI_API_KEY="..." \
   -e SERVER_PORT="8080" \
   smart-todo-server
+
+# Run worker container (separate process)
+docker run \
+  -e DATABASE_URL="postgres://..." \
+  -e REDIS_URL="redis://..." \
+  -e RABBITMQ_URL="amqp://..." \
+  -e OPENAI_API_KEY="..." \
+  smart-todo-worker
 ```
+
+**Note**: The worker should run as a separate container/process. Multiple worker instances can run for horizontal scaling.
 
 ## Troubleshooting
 
@@ -625,9 +769,26 @@ HSTS should **never** cause issues in local development because:
 
 If receiving validation errors:
 - Check that todo text is between 1-10,000 characters
-- Verify enum values (`time_horizon`: `now`, `soon`, `later`; `status`: `pending`, `processing`, `completed`)
+- Verify enum values (`time_horizon`: `next`, `soon`, `later`; `status`: `pending`, `processing`, `completed`)
 - Ensure required fields are provided
 - Check that UUIDs are in valid format
+
+#### AI Features Not Working
+
+If AI features are not working:
+- Verify `OPENAI_API_KEY` is set correctly
+- Check that `RABBITMQ_URL` is configured and RabbitMQ is running
+- Ensure the RabbitMQ delayed message exchange plugin is enabled: `rabbitmq-plugins enable rabbitmq_delayed_message_exchange`
+- Verify the worker process is running (required for processing AI analysis jobs)
+- Check worker logs for errors processing jobs
+
+#### RabbitMQ Connection Issues
+
+If RabbitMQ connection fails:
+- Verify RabbitMQ is running: `rabbitmqctl status`
+- Check connection URL format: `amqp://user:password@host:5672/vhost`
+- Ensure delayed message exchange plugin is enabled
+- For Docker: verify RabbitMQ service is healthy in `docker-compose ps`
 
 #### Debug Logging
 
@@ -637,6 +798,48 @@ export DEBUG=true
 ```
 
 This will output detailed CORS request logging which can help diagnose CORS issues during development.
+
+## AI Features
+
+### Automatic Task Analysis
+
+When a new todo is created, an AI analysis job is automatically queued. The worker process:
+1. Analyzes the task text using the configured AI provider (OpenAI)
+2. Extracts category tags (e.g., "work", "personal", "urgent", "email")
+3. Suggests a time horizon (`next`, `soon`, or `later`)
+4. Merges AI-generated tags with any existing user-defined tags (user tags take precedence)
+
+Analysis happens asynchronously, so the API returns immediately while processing continues in the background.
+
+### Interactive AI Chat
+
+Users can chat with the AI to provide context and preferences:
+- Start a chat session via `GET /api/v1/ai/chat` (Server-Sent Events)
+- Send messages via `POST /api/v1/ai/chat`
+- The AI uses conversation history to better categorize tasks
+- Conversation summaries are stored and used in future task analysis
+
+### Tag Management
+
+- **AI-Generated Tags**: Automatically extracted from task text
+- **User-Defined Tags**: Users can add/remove tags via the API
+- **Tag Override**: User-defined tags always take precedence over AI-generated tags
+- **Tag Sources**: System tracks whether tags are from AI or user input
+
+### Time Horizon Management
+
+- Time horizons are: `next` (formerly `now`), `soon`, and `later`
+- AI suggests time horizons based on task urgency and content
+- Users can override AI suggestions
+- Automatic reprocessing (2x daily) re-evaluates time horizons as priorities change
+
+### Reprocessing Schedule
+
+Tasks are automatically re-analyzed:
+- **Frequency**: Twice daily (morning and evening)
+- **Pause Logic**: Reprocessing pauses after 3 days of user inactivity
+- **Resume Logic**: Reprocessing resumes when user logs in again
+- **Eligibility**: Only active users (not paused) receive reprocessing
 
 ## Contributing
 

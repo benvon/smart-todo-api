@@ -8,6 +8,8 @@ resources:
   - configmap.yaml
   - secret.yaml
   - redis-deployment.yaml
+  - rabbitmq-deployment.yaml
+  - worker-deployment.yaml
   - migration-job.yaml
   - deployment.yaml
   - service.yaml

@@ -12,7 +12,7 @@ func TestTimeHorizon_Values(t *testing.T) {
 		value TimeHorizon
 		valid bool
 	}{
-		{"now", TimeHorizonNow, true},
+		{"next", TimeHorizonNext, true},
 		{"soon", TimeHorizonSoon, true},
 		{"later", TimeHorizonLater, true},
 		{"invalid", TimeHorizon("invalid"), false},
@@ -22,7 +22,7 @@ func TestTimeHorizon_Values(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			switch tt.value {
-			case TimeHorizonNow, TimeHorizonSoon, TimeHorizonLater:
+			case TimeHorizonNext, TimeHorizonSoon, TimeHorizonLater:
 				if !tt.valid {
 					t.Errorf("Expected %s to be invalid", tt.value)
 				}
@@ -45,6 +45,7 @@ func TestTodoStatus_Values(t *testing.T) {
 	}{
 		{"pending", TodoStatusPending, true},
 		{"processing", TodoStatusProcessing, true},
+		{"processed", TodoStatusProcessed, true},
 		{"completed", TodoStatusCompleted, true},
 		{"invalid", TodoStatus("invalid"), false},
 	}
@@ -53,7 +54,7 @@ func TestTodoStatus_Values(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			switch tt.value {
-			case TodoStatusPending, TodoStatusProcessing, TodoStatusCompleted:
+			case TodoStatusPending, TodoStatusProcessing, TodoStatusProcessed, TodoStatusCompleted:
 				if !tt.valid {
 					t.Errorf("Expected %s to be invalid", tt.value)
 				}

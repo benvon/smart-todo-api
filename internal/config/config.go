@@ -12,9 +12,13 @@ type Config struct {
 	BaseURL       string
 	FrontendURL   string
 	OpenAIKey     string
+	AIProvider    string
+	AIModel       string
+	AIBaseURL     string
 	EnableHSTS    bool
 	OIDCProvider  string
 	RedisURL      string
+	RabbitMQURL   string
 }
 
 // Load loads configuration from environment variables
@@ -25,9 +29,13 @@ func Load() (*Config, error) {
 		BaseURL:      getEnv("BASE_URL", "http://localhost:8080"),
 		FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:3000"),
 		OpenAIKey:    getEnv("OPENAI_API_KEY", ""),
+		AIProvider:   getEnv("AI_PROVIDER", "openai"),
+		AIModel:      getEnv("AI_MODEL", ""),
+		AIBaseURL:    getEnv("AI_BASE_URL", ""),
 		EnableHSTS:   getEnvBool("ENABLE_HSTS", false),
 		OIDCProvider: getEnv("OIDC_PROVIDER", "cognito"),
 		RedisURL:     getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		RabbitMQURL:  getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
 	}
 
 	if cfg.DatabaseURL == "" {
