@@ -237,7 +237,109 @@ func (q *RabbitMQQueue) Enqueue(ctx context.Context, job *Job) error {
 	return nil
 }
 
+// Consume returns a channel of messages from the queue using async delivery
+// This is the recommended approach for production as it eliminates polling delays
+// and provides better load balancing across multiple worker instances
+func (q *RabbitMQQueue) Consume(ctx context.Context, prefetchCount int) (<-chan *Message, <-chan error, error) {
+	// Create a dedicated channel for consuming (best practice: separate channel for consumers)
+	consumeCh, err := q.conn.Channel()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create consumer channel: %w", err)
+	}
+
+	// Set QoS/prefetch to control how many unacknowledged messages this consumer can hold
+	// This ensures fair distribution across multiple workers
+	// prefetchCount=1 means each worker gets one message at a time (fair dispatch)
+	// Higher values allow workers to prefetch multiple messages (better throughput but less fair)
+	if err := consumeCh.Qos(prefetchCount, 0, false); err != nil {
+		consumeCh.Close()
+		return nil, nil, fmt.Errorf("failed to set QoS: %w", err)
+	}
+
+	// Start consuming messages
+	deliveries, err := consumeCh.Consume(
+		q.queueName,
+		"",    // consumer tag (empty = auto-generate)
+		false, // auto-ack (false = manual ack required)
+		false, // exclusive
+		false, // no-local
+		false, // no-wait
+		nil,   // args
+	)
+	if err != nil {
+		consumeCh.Close()
+		return nil, nil, fmt.Errorf("failed to start consuming: %w", err)
+	}
+
+	// Create channels for messages and errors
+	msgChan := make(chan *Message, prefetchCount)
+	errChan := make(chan error, 1)
+
+	// Start goroutine to process deliveries
+	go func() {
+		defer close(msgChan)
+		defer close(errChan)
+		defer consumeCh.Close()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case delivery, ok := <-deliveries:
+				if !ok {
+					// Channel closed (connection lost)
+					errChan <- fmt.Errorf("delivery channel closed")
+					return
+				}
+
+				// Check if message has expired
+				if delivery.Expiration != "" {
+					// Message expired, don't requeue
+					_ = delivery.Nack(false, false)
+					continue
+				}
+
+				// Unmarshal job
+				var job Job
+				if err := json.Unmarshal(delivery.Body, &job); err != nil {
+					// Invalid message, send to DLQ
+					_ = delivery.Nack(false, false)
+					errChan <- fmt.Errorf("failed to unmarshal job: %w", err)
+					continue
+				}
+
+				// Check if job should be processed now (respect NotBefore)
+				if !job.ShouldProcess() {
+					// Not ready yet, requeue for later
+					_ = delivery.Nack(false, true)
+					continue
+				}
+
+				// Create message wrapper
+				msg := &Message{
+					Job:         &job,
+					DeliveryTag: delivery.DeliveryTag,
+					Channel:     consumeCh,
+				}
+
+				// Send message (non-blocking)
+				select {
+				case <-ctx.Done():
+					// Context cancelled, requeue the message
+					_ = delivery.Nack(false, true)
+					return
+				case msgChan <- msg:
+					// Message sent successfully
+				}
+			}
+		}
+	}()
+
+	return msgChan, errChan, nil
+}
+
 // Dequeue removes and returns a message from the queue
+// DEPRECATED: Use Consume() for better performance and scalability
 func (q *RabbitMQQueue) Dequeue(ctx context.Context) (*Message, error) {
 	msg, ok, err := q.channel.Get(
 		q.queueName,

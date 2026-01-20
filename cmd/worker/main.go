@@ -99,47 +99,48 @@ func main() {
 
 	log.Println("Worker started, processing jobs...")
 
-	// Worker loop
+	// Configure prefetch count for fair distribution across workers
+	// prefetchCount=1 ensures fair dispatch (one message per worker at a time)
+	// Higher values improve throughput but can lead to uneven distribution
+	// For AI processing jobs, 1-3 is typically optimal
+	// Default is 1 if RABBITMQ_PREFETCH is not set
+	prefetchCount := cfg.RabbitMQPrefetch
+	if prefetchCount < 1 {
+		prefetchCount = 1
+		log.Printf("Warning: RABBITMQ_PREFETCH must be >= 1, using default of 1")
+	}
+	log.Printf("Using RabbitMQ prefetch count: %d", prefetchCount)
+
+	// Start consuming messages asynchronously
+	msgChan, errChan, err := jobQueue.Consume(ctx, prefetchCount)
+	if err != nil {
+		log.Fatalf("Failed to start consuming jobs: %v", err)
+	}
+
+	// Worker loop - processes messages as they arrive
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			default:
-				// Dequeue job
-				msg, err := jobQueue.Dequeue(ctx)
+			case err := <-errChan:
 				if err != nil {
-					log.Printf("Failed to dequeue job: %v", err)
+					log.Printf("Error from message consumer: %v", err)
+					// Wait a bit before retrying (the consumer will attempt to reconnect)
 					time.Sleep(5 * time.Second)
-					continue
 				}
-
-				if msg == nil {
-					// No job available, wait a bit
-					time.Sleep(1 * time.Second)
-					continue
-				}
-
-				// Check if job should be processed now (respect NotBefore)
-				if !msg.Job.ShouldProcess() {
-					log.Printf("Job %s scheduled for later (NotBefore: %v), returning to queue",
-						msg.Job.ID, msg.Job.NotBefore)
-					// Ack to return to queue so it can be picked up later
-					if ackErr := msg.Ack(); ackErr != nil {
-						log.Printf("Failed to ack delayed job: %v", ackErr)
-					}
-					time.Sleep(5 * time.Second) // Wait before checking again
-					continue
+			case msg, ok := <-msgChan:
+				if !ok {
+					// Channel closed
+					log.Println("Message channel closed, stopping worker")
+					return
 				}
 
 				// Process job
 				if err := analyzer.ProcessJob(ctx, msg); err != nil {
 					log.Printf("Failed to process job: %v", err)
-					// For rate limit errors, wait before trying next job
-					// (This is handled in handleJobError, but we add a small delay here too)
-					if msg.Job.RetryCount > 0 {
-						time.Sleep(2 * time.Second) // Brief pause between retries
-					}
+					// Error handling (including retries) is done in ProcessJob
+					// For rate limit errors, ProcessJob handles re-enqueueing with delays
 				}
 			}
 		}

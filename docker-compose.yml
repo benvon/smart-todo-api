@@ -70,6 +70,7 @@ services:
       - DATABASE_URL=postgres://user:password@db:5432/smarttodo?sslmode=disable
       - REDIS_URL=redis://redis:6379/0
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - RABBITMQ_PREFETCH=${RABBITMQ_PREFETCH:-1}  # Number of unacknowledged messages per worker (default: 1)
       - AI_PROVIDER=${AI_PROVIDER:-openai}
       - AI_MODEL=${AI_MODEL:-gpt-5-mini}
       # OPENAI_API_KEY will be loaded from .env file via env_file

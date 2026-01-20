@@ -40,6 +40,12 @@ spec:
             configMapKeyRef:
               name: app-config
               key: RABBITMQ_URL
+        - name: RABBITMQ_PREFETCH
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PREFETCH
+              optional: true
         - name: AI_PROVIDER
           valueFrom:
             configMapKeyRef:

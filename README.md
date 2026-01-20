@@ -112,7 +112,7 @@ export BASE_URL="http://localhost:8080"
 export FRONTEND_URL="http://localhost:3000"
 export OPENAI_API_KEY=""  # Required for AI features
 export AI_PROVIDER="openai"  # AI provider to use (default: openai)
-export AI_MODEL="gpt-4o-mini"  # AI model to use (default: gpt-4o-mini)
+export AI_MODEL="gpt-5-mini"  # AI model to use (default: gpt-5-mini)
 # Security settings (optional for local development)
 # export ENABLE_HSTS="false"  # Don't set HSTS for local HTTP development
 # export OIDC_PROVIDER="cognito"  # Default provider name
@@ -458,13 +458,13 @@ migrate -path internal/database/migrations -database "$DATABASE_URL" version
 |----------|-------------|---------|----------|
 | `DATABASE_URL` | PostgreSQL connection string | - | Yes |
 | `REDIS_URL` | Redis connection URL for rate limiting | `redis://localhost:6379/0` | No (has default) |
-| `RABBITMQ_URL` | RabbitMQ connection URL for job queueing | - | Yes (if using AI features) |
+| `RABBITMQ_URL` | RabbitMQ connection URL for job queueing | - | Yes |
 | `SERVER_PORT` | Server port | `8080` | No |
 | `BASE_URL` | Base URL for the API | `http://localhost:8080` | No |
 | `FRONTEND_URL` | Frontend URL for CORS | `http://localhost:3000` | No |
 | `OPENAI_API_KEY` | OpenAI API key | - | No (required for AI features) |
 | `AI_PROVIDER` | AI provider to use (`openai`) | `openai` | No |
-| `AI_MODEL` | AI model to use | `gpt-4o-mini` | No |
+| `AI_MODEL` | AI model to use | `gpt-5-mini` | No |
 | `AI_BASE_URL` | AI API base URL (for custom endpoints) | - | No |
 | `ENABLE_HSTS` | Enable HSTS header (production only, requires HTTPS) | `false` | No |
 | `OIDC_PROVIDER` | OIDC provider name to use | `cognito` | No |
@@ -475,10 +475,10 @@ migrate -path internal/database/migrations -database "$DATABASE_URL" version
   - `redis://localhost:6379/0` (local, no password)
   - `redis://:password@host:6379/0` (with password)
   - `redis://user:password@host:6379/0` (with username and password)
-- RabbitMQ is required for AI features (job queueing). The server will run without it, but AI features will be disabled. RabbitMQ connection URL format:
+- RabbitMQ is required for job queueing (AI features). The server will fail to start if RabbitMQ is unavailable. RabbitMQ connection URL format:
   - `amqp://guest:guest@localhost:5672/` (default local)
   - `amqp://user:password@host:5672/vhost` (with credentials and vhost)
-- AI features require both `OPENAI_API_KEY` and `RABBITMQ_URL` to be set. Without these, basic todo management still works.
+- AI features require both `OPENAI_API_KEY` and `RABBITMQ_URL` to be set. The server will start without `OPENAI_API_KEY`, but AI features will be disabled. RabbitMQ is always required for the job queue system.
 
 ### Frontend Configuration (`web/config.json`)
 

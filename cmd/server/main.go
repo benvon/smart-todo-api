@@ -52,42 +52,37 @@ func main() {
 	}()
 	log.Println("Connected to Redis for rate limiting")
 
-	// Connect to RabbitMQ for job queue (optional)
+	// Connect to RabbitMQ for job queue (required)
 	// Retry connection with exponential backoff to handle RabbitMQ startup delays
+	const maxRetries = 10
+	const initialDelay = 2 * time.Second
 	var jobQueue queue.JobQueue
-	if cfg.RabbitMQURL != "" {
-		const maxRetries = 10
-		const initialDelay = 2 * time.Second
-		var lastErr error
+	var lastErr error
 
-		for attempt := 0; attempt < maxRetries; attempt++ {
-			jobQueue, err = queue.NewRabbitMQQueue(cfg.RabbitMQURL)
-			if err == nil {
-				log.Println("Connected to RabbitMQ for job queue")
-				defer func() {
-					if err := jobQueue.Close(); err != nil {
-						log.Printf("Failed to close RabbitMQ connection: %v", err)
-					}
-				}()
-				break
-			}
-
-			lastErr = err
-			delay := initialDelay * time.Duration(1<<uint(attempt)) // Exponential backoff
-			if delay > 30*time.Second {
-				delay = 30 * time.Second // Cap at 30 seconds
-			}
-			log.Printf("Failed to connect to RabbitMQ (attempt %d/%d): %v, retrying in %v...",
-				attempt+1, maxRetries, err, delay)
-			time.Sleep(delay)
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		jobQueue, err = queue.NewRabbitMQQueue(cfg.RabbitMQURL)
+		if err == nil {
+			log.Println("Connected to RabbitMQ for job queue")
+			defer func() {
+				if err := jobQueue.Close(); err != nil {
+					log.Printf("Failed to close RabbitMQ connection: %v", err)
+				}
+			}()
+			break
 		}
 
-		if err != nil {
-			log.Printf("Warning: Failed to connect to RabbitMQ after %d attempts: %v (job queue disabled)", maxRetries, lastErr)
-			jobQueue = nil
+		lastErr = err
+		delay := initialDelay * time.Duration(1<<uint(attempt)) // Exponential backoff
+		if delay > 30*time.Second {
+			delay = 30 * time.Second // Cap at 30 seconds
 		}
-	} else {
-		log.Println("RABBITMQ_URL not configured - job queue disabled")
+		log.Printf("Failed to connect to RabbitMQ (attempt %d/%d): %v, retrying in %v...",
+			attempt+1, maxRetries, err, delay)
+		time.Sleep(delay)
+	}
+
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ after %d attempts: %v (RabbitMQ is required for AI features)", maxRetries, lastErr)
 	}
 
 	// Initialize repositories
@@ -117,12 +112,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(oidcProvider, cfg.OIDCProvider)
-	var todoHandler *handlers.TodoHandler
-	if jobQueue != nil {
-		todoHandler = handlers.NewTodoHandlerWithQueue(todoRepo, jobQueue)
-	} else {
-		todoHandler = handlers.NewTodoHandler(todoRepo)
-	}
+	todoHandler := handlers.NewTodoHandlerWithQueue(todoRepo, jobQueue)
 	healthChecker := handlers.NewHealthChecker(db)
 
 	var chatHandler *handlers.ChatHandler
