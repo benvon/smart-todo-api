@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: worker
+  name: app
   namespace: smart-todo
   labels:
     app: smart-todo
-    component: worker
+    component: api
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: smart-todo
-      component: worker
+      component: api
   template:
     metadata:
       labels:
         app: smart-todo
-        component: worker
+        component: api
     spec:
       initContainers:
       - name: build-connection-strings
@@ -95,7 +95,7 @@ spec:
         - name: shared-connection-strings
           mountPath: /shared
       containers:
-      - name: worker
+      - name: server
         # Replace with your actual image name and tag
         image: smart-todo:latest
         imagePullPolicy: IfNotPresent
@@ -122,19 +122,32 @@ spec:
           fi
           
           # Execute the original command
-          exec /app/worker
+          exec /app/start_server.sh
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
         env:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: app-secrets
               key: DATABASE_URL
-        - name: RABBITMQ_PREFETCH
+        - name: SERVER_PORT
           valueFrom:
             configMapKeyRef:
               name: app-config
-              key: RABBITMQ_PREFETCH
-              optional: true
+              key: SERVER_PORT
+        - name: BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: BASE_URL
+        - name: FRONTEND_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: FRONTEND_URL
         - name: AI_PROVIDER
           valueFrom:
             configMapKeyRef:
@@ -160,6 +173,24 @@ spec:
         #       name: app-secrets
         #       key: OPENAI_API_KEY
         #       optional: true
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        # Note: App depends on Redis being available for rate limiting
+        # Consider adding initContainer or adjusting readinessProbe if Redis is slow to start
         volumeMounts:
         - name: shared-connection-strings
           mountPath: /shared
@@ -170,26 +201,6 @@ spec:
           limits:
             memory: "512Mi"
             cpu: "1000m"
-        livenessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "ps aux | grep -v grep | grep -q worker || exit 1"
-          initialDelaySeconds: 30
-          periodSeconds: 30
-          timeoutSeconds: 10
-          failureThreshold: 3
-        readinessProbe:
-          exec:
-            command:
-            - sh
-            - -c
-            - "ps aux | grep -v grep | grep -q worker || exit 1"
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          timeoutSeconds: 5
-          failureThreshold: 3
       volumes:
       - name: shared-connection-strings
         emptyDir: {}
