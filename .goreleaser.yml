@@ -125,7 +125,7 @@ archives:
     files:
       - README.md
       - LICENSE
-    builds:
+    ids:
       - server
 
   - id: "configure"
@@ -143,7 +143,7 @@ archives:
     files:
       - README.md
       - LICENSE
-    builds:
+    ids:
       - configure
 
   - id: "worker"
@@ -161,7 +161,7 @@ archives:
     files:
       - README.md
       - LICENSE
-    builds:
+    ids:
       - worker
 
 checksum:
@@ -206,14 +206,11 @@ release:
 
     Welcome to this new release!
 
-# Docker images
+# Docker images (v2)
 # Note: Dockerfiles build binaries themselves, so GoReleaser's pre-built binaries are not used
-dockers:
+dockers_v2:
   # Server image (includes server and configure binaries)
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-server:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-server:latest"
-    dockerfile: server.Dockerfile
+  - dockerfile: server.Dockerfile
     use: docker
     # The Dockerfile copies everything with COPY . ., so extra_files are optional
     # but listed here for clarity about what's included in the build context
@@ -226,18 +223,21 @@ dockers:
       - internal/
       - api/
       - scripts/
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-server"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
     build_flag_templates:
-      - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}-server"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
       - "--label=org.opencontainers.image.version={{.Version}}"
 
   # Worker image
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-worker:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-worker:latest"
-    dockerfile: worker.Dockerfile
+  - dockerfile: worker.Dockerfile
     use: docker
     extra_files:
       - go.mod
@@ -246,24 +246,33 @@ dockers:
       - LICENSE
       - cmd/
       - internal/
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-worker"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
     build_flag_templates:
-      - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}-worker"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
       - "--label=org.opencontainers.image.version={{.Version}}"
 
   # Web frontend image
-  - image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-web:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-web:latest"
-    dockerfile: web.Dockerfile
+  - dockerfile: web.Dockerfile
     use: docker
     extra_files:
       - web/
       - scripts/generate_config.sh
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-web"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
     build_flag_templates:
-      - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{.Date}}"
       - "--label=org.opencontainers.image.title={{.ProjectName}}-web"
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
