@@ -20,3 +20,11 @@ func (m *Message) Ack() error {
 func (m *Message) Nack(requeue bool) error {
 	return m.Channel.Nack(m.DeliveryTag, false, requeue)
 }
+
+// GetJob returns the job associated with this message
+func (m *Message) GetJob() *Job {
+	return m.Job
+}
+
+// Ensure Message implements MessageInterface
+var _ MessageInterface = (*Message)(nil)

@@ -15,18 +15,18 @@ import (
 // TaskAnalyzer processes task analysis jobs
 type TaskAnalyzer struct {
 	aiProvider   ai.AIProvider
-	todoRepo     *database.TodoRepository
-	contextRepo  *database.AIContextRepository
-	activityRepo *database.UserActivityRepository
+	todoRepo     database.TodoRepositoryInterface
+	contextRepo  database.AIContextRepositoryInterface
+	activityRepo database.UserActivityRepositoryInterface
 	jobQueue     queue.JobQueue // For re-enqueueing jobs with delays
 }
 
 // NewTaskAnalyzer creates a new task analyzer
 func NewTaskAnalyzer(
 	aiProvider ai.AIProvider,
-	todoRepo *database.TodoRepository,
-	contextRepo *database.AIContextRepository,
-	activityRepo *database.UserActivityRepository,
+	todoRepo database.TodoRepositoryInterface,
+	contextRepo database.AIContextRepositoryInterface,
+	activityRepo database.UserActivityRepositoryInterface,
 	jobQueue queue.JobQueue,
 ) *TaskAnalyzer {
 	return &TaskAnalyzer{
@@ -204,8 +204,8 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 }
 
 // ProcessJob processes a job based on its type
-func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg *queue.Message) error {
-	job := msg.Job
+func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface) error {
+	job := msg.GetJob()
 
 	// Check if job should be processed now (respect NotBefore)
 	if !job.ShouldProcess() {
@@ -249,7 +249,7 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg *queue.Message) error
 }
 
 // handleJobError handles errors from job processing with intelligent retry logic
-func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg *queue.Message, job *queue.Job, err error, jobType string) error {
+func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInterface, job *queue.Job, err error, jobType string) error {
 	// Check if it's a quota error (should not retry immediately)
 	if ai.IsQuotaError(err) {
 		log.Printf("Quota exceeded for %s job %s: %v", jobType, job.ID, err)

@@ -252,7 +252,10 @@ func (q *RabbitMQQueue) Consume(ctx context.Context, prefetchCount int) (<-chan 
 	// prefetchCount=1 means each worker gets one message at a time (fair dispatch)
 	// Higher values allow workers to prefetch multiple messages (better throughput but less fair)
 	if err := consumeCh.Qos(prefetchCount, 0, false); err != nil {
-		consumeCh.Close()
+		if closeErr := consumeCh.Close(); closeErr != nil {
+			// Log error but continue with original error
+			_ = closeErr
+		}
 		return nil, nil, fmt.Errorf("failed to set QoS: %w", err)
 	}
 
@@ -267,7 +270,10 @@ func (q *RabbitMQQueue) Consume(ctx context.Context, prefetchCount int) (<-chan 
 		nil,   // args
 	)
 	if err != nil {
-		consumeCh.Close()
+		if closeErr := consumeCh.Close(); closeErr != nil {
+			// Log error but continue with original error
+			_ = closeErr
+		}
 		return nil, nil, fmt.Errorf("failed to start consuming: %w", err)
 	}
 
@@ -279,7 +285,12 @@ func (q *RabbitMQQueue) Consume(ctx context.Context, prefetchCount int) (<-chan 
 	go func() {
 		defer close(msgChan)
 		defer close(errChan)
-		defer consumeCh.Close()
+		defer func() {
+			if err := consumeCh.Close(); err != nil {
+				// Log error but continue - channel may already be closed
+				_ = err
+			}
+		}()
 
 		for {
 			select {
