@@ -210,7 +210,8 @@ release:
 # Note: Dockerfiles build binaries themselves, so GoReleaser's pre-built binaries are not used
 dockers_v2:
   # Server image (includes server and configure binaries)
-  - dockerfile: server.Dockerfile
+  - id: server
+    dockerfile: server.Dockerfile
     # The Dockerfile copies everything with COPY . ., so extra_files are optional
     # but listed here for clarity about what's included in the build context
     extra_files:
@@ -236,7 +237,8 @@ dockers_v2:
       org.opencontainers.image.version: "{{.Version}}"
 
   # Worker image
-  - dockerfile: worker.Dockerfile
+  - id: worker
+    dockerfile: worker.Dockerfile
     extra_files:
       - go.mod
       - go.sum
@@ -258,7 +260,8 @@ dockers_v2:
       org.opencontainers.image.version: "{{.Version}}"
 
   # Web frontend image
-  - dockerfile: web.Dockerfile
+  - id: web
+    dockerfile: web.Dockerfile
     extra_files:
       - web/
       - scripts/generate_config.sh
