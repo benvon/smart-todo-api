@@ -106,6 +106,10 @@ async function apiRequest(endpoint, options = {}) {
  * Get OIDC login configuration
  */
 async function getOIDCLoginConfig() {
+    // Wait for config to load before making API call
+    if (window.CONFIG_LOADED) {
+        await window.CONFIG_LOADED;
+    }
     const url = `${window.API_BASE_URL}/api/v1/auth/oidc/login`;
     try {
         const response = await fetch(url);
@@ -240,6 +244,10 @@ async function sendChatMessage(message) {
  * Check API health status
  */
 async function checkAPIHealth() {
+    // Wait for config to load before making API call
+    if (window.CONFIG_LOADED) {
+        await window.CONFIG_LOADED;
+    }
     try {
         const url = `${window.API_BASE_URL}/healthz`;
         const response = await fetch(url, {

@@ -25,10 +25,29 @@ spec:
         - containerPort: 6379
           name: redis
           protocol: TCP
+        env:
+        - name: REDIS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: REDIS_USERNAME
+              optional: true
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: REDIS_PASSWORD
+              optional: true
         command:
-        - redis-server
-        - --appendonly
-        - "yes"
+        - sh
+        - -c
+        - |
+          set -e
+          REDIS_ARGS="--appendonly yes"
+          if [ -n "$REDIS_PASSWORD" ]; then
+            REDIS_ARGS="$REDIS_ARGS --requirepass $REDIS_PASSWORD"
+          fi
+          exec redis-server $REDIS_ARGS
         volumeMounts:
         - name: redis-data
           mountPath: /data
@@ -42,8 +61,14 @@ spec:
         livenessProbe:
           exec:
             command:
-            - redis-cli
-            - ping
+            - sh
+            - -c
+            - |
+              if [ -n "$REDIS_PASSWORD" ]; then
+                redis-cli -a "$REDIS_PASSWORD" ping
+              else
+                redis-cli ping
+              fi
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
@@ -51,8 +76,14 @@ spec:
         readinessProbe:
           exec:
             command:
-            - redis-cli
-            - ping
+            - sh
+            - -c
+            - |
+              if [ -n "$REDIS_PASSWORD" ]; then
+                redis-cli -a "$REDIS_PASSWORD" ping
+              else
+                redis-cli ping
+              fi
           initialDelaySeconds: 5
           periodSeconds: 5
           timeoutSeconds: 3
