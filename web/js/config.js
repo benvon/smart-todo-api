@@ -7,8 +7,9 @@ const DEFAULT_API_BASE_URL = 'http://localhost:8080';
 // Set default immediately to avoid undefined errors
 window.API_BASE_URL = window.API_BASE_URL || DEFAULT_API_BASE_URL;
 
-// Load configuration from config.json
-(async function loadConfig() {
+// Create a promise that resolves when config is loaded
+// This ensures config is loaded before other scripts use window.API_BASE_URL
+window.CONFIG_LOADED = (async function loadConfig() {
     try {
         const response = await fetch('/config.json');
         if (!response.ok) {
