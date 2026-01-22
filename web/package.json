@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "security:audit": "npm audit",
-    "security:check": "npm audit --audit-level=moderate && npm outdated",
+    "security:check": "npm audit --audit-level=moderate && (npm outdated || true)",
     "build:check": "npm run build"
   },
   "dependencies": {

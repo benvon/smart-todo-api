@@ -84,6 +84,8 @@ cd /tmp
 tar -czf "${PACKAGE_NAME}.tar.gz" "${PACKAGE_NAME}"
 
 # Output the package path (absolute path for GitHub Actions)
+# Only output the path to stdout (last line) for workflow extraction
+# Send informational messages to stderr
 PACKAGE_FILE="/tmp/${PACKAGE_NAME}.tar.gz"
+echo "Package created: ${PACKAGE_FILE}" >&2
 echo "${PACKAGE_FILE}"
-echo "Package created: ${PACKAGE_FILE}"
