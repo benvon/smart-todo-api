@@ -6,9 +6,8 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 
-// Access chrono-node: try default export first, then use namespace
-// When bundled by esbuild, this should resolve correctly
-const chrono = (chronoNs && chronoNs.default) ? chronoNs.default : chronoNs;
+// Use chrono-node namespace directly (no default export in ESM)
+const chrono = chronoNs;
 
 // Extend dayjs with plugins
 dayjs.extend(relativeTime);

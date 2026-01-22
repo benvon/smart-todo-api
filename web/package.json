@@ -6,13 +6,22 @@
   "scripts": {
     "build": "node esbuild.config.js",
     "dev": "node esbuild.config.js --watch",
-    "test": "node --test js/**/*.test.js"
+    "test": "node --test js/**/*.test.js",
+    "test:coverage": "c8 --reporter=text --reporter=html npm test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "security:audit": "npm audit",
+    "security:check": "npm audit --audit-level=moderate && npm outdated",
+    "build:check": "npm run build"
   },
   "dependencies": {
     "chrono-node": "^2.7.8",
     "dayjs": "^1.11.13"
   },
   "devDependencies": {
-    "esbuild": "^0.24.2"
+    "esbuild": "^0.27.2",
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "c8": "^9.0.0"
   }
 }
