@@ -423,7 +423,7 @@ web-clean:
 	$(call print_info,Cleaning web build artifacts...)
 	rm -rf web/dist
 	rm -rf web/node_modules/.cache
-	rm -f web/coverage
+	rm -rf web/coverage
 	$(call print_success,Web build artifacts cleaned!)
 
 ## clean-template: Clean up template code and prepare for new project development
