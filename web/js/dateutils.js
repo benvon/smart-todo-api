@@ -69,9 +69,10 @@ export function parseNaturalDate(dateString) {
                                firstResult.start.get('minute') !== null ||
                                firstResult.start.get('second') !== null;
         
-        // Only keep time if it was explicitly provided in the input
+        // Only keep time if it was explicitly provided in the input OR detected by chrono-node
         // For relative dates like "in two weeks", normalize to midnight
-        if (!hasExplicitTime) {
+        // Use both checks: explicit time keywords OR chrono-node detected time components
+        if (!hasExplicitTime && !parsedHasTime) {
             parsedDate = new Date(parsedDate);
             parsedDate.setHours(0, 0, 0, 0);
         }
@@ -191,9 +192,10 @@ export function extractDateFromText(text) {
                           resultToUse.start.get('minute') !== null ||
                           resultToUse.start.get('second') !== null;
     
-    // Only keep time if it was explicitly provided in the input
+    // Only keep time if it was explicitly provided in the input OR detected by chrono-node
     // For relative dates like "in two weeks", normalize to midnight
-    const dateOnly = !hasExplicitTime;
+    // Use both checks: explicit time keywords OR chrono-node detected time components
+    const dateOnly = !hasExplicitTime && !parsedHasTime;
     
     // If date-only, normalize to midnight
     if (dateOnly) {
