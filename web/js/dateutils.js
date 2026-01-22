@@ -25,7 +25,9 @@ if (typeof window !== 'undefined') {
  * @returns {boolean} - True if the date is at midnight (date-only)
  */
 function isDateOnly(isoString) {
-    if (!isoString) return false;
+    if (!isoString) {
+        return false;
+    }
     const date = new Date(isoString);
     return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0 && date.getMilliseconds() === 0;
 }
@@ -87,10 +89,14 @@ export function parseNaturalDate(dateString) {
  * @returns {string} - Formatted date string
  */
 export function formatDate(isoString) {
-    if (!isoString) return '';
+    if (!isoString) {
+        return '';
+    }
     
     const date = dayjs(isoString);
-    if (!date.isValid()) return '';
+    if (!date.isValid()) {
+        return '';
+    }
     
     const now = dayjs();
     // Use calendar day difference, not time difference, for accurate "Today"/"Tomorrow" detection

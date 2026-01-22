@@ -1,5 +1,10 @@
 // Main application logic
 
+import { handleCallback, initiateLogin, isAuthenticated, logout } from './auth.js';
+import { checkAPIHealth, getTodos, createTodo, updateTodo, deleteTodo, completeTodo, analyzeTodo } from './api.js';
+import { parseNaturalDate, extractDateFromText, formatDate } from './dateutils.js';
+import { initChat } from './chat.js';
+
 let todos = [];
 
 // Initialize app
@@ -353,7 +358,9 @@ function renderTodos() {
     
     // Clear existing todos
     [nextList, soonList, laterList].forEach(list => {
-        if (list) list.innerHTML = '';
+        if (list) {
+            list.innerHTML = '';
+        }
     });
     
     // Filter and render
@@ -373,7 +380,9 @@ function renderTodos() {
  * Render a list of todos
  */
 function renderTodoList(container, todoList, timeHorizon) {
-    if (!container) return;
+    if (!container) {
+        return;
+    }
     
     // Set data attribute for drop zone identification
     container.setAttribute('data-time-horizon', timeHorizon);
@@ -737,15 +746,6 @@ async function handleEditDueDate(id, element, currentDueDate) {
             input.replaceWith(newElement);
         }
     });
-}
-
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 /**

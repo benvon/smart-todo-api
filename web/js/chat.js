@@ -1,5 +1,7 @@
 // Chat functionality
 
+import { sendChatMessage } from './api.js';
+
 /**
  * Initialize chat interface
  */

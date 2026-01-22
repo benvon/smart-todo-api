@@ -1,5 +1,8 @@
 // OIDC Authentication handling
 
+import { getOIDCLoginConfig } from './api.js';
+import { storeToken, getToken, isTokenExpired, removeToken } from './jwt.js';
+
 /**
  * Initiate OIDC login flow
  */
@@ -17,7 +20,7 @@ async function initiateLogin() {
             client_id: config.data.client_id,
             redirect_uri: config.data.redirect_uri,
             scope: config.data.scope,
-            state: state,
+            state: state
         });
         
         const authUrl = `${config.data.authorization_endpoint}?${params.toString()}`;
@@ -97,20 +100,20 @@ async function exchangeCodeForToken(code, oidcConfig) {
         grant_type: 'authorization_code',
         code: code.substring(0, 20) + '...', // Log partial code for debugging
         client_id: oidcConfig.client_id,
-        redirect_uri: oidcConfig.redirect_uri,
+        redirect_uri: oidcConfig.redirect_uri
     });
     
     const response = await fetch(tokenEndpoint, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/x-www-form-urlencoded'
         },
         body: new URLSearchParams({
             grant_type: 'authorization_code',
             code: code,
             client_id: oidcConfig.client_id,
-            redirect_uri: oidcConfig.redirect_uri,
-        }),
+            redirect_uri: oidcConfig.redirect_uri
+        })
     });
     
     if (!response.ok) {
