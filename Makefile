@@ -1,6 +1,6 @@
 # This makefile provides targets that mirror the CI pipeline and help with development
 
-.PHONY: help test lint security vulnerability-check build clean setup deps verify mod-tidy-check all ci-local clean-template
+.PHONY: help test lint security vulnerability-check build clean setup deps verify mod-tidy-check all ci-local clean-template web-test web-lint web-security web-build web-clean web-deps web-verify
 
 # =============================================================================
 # Configuration
@@ -378,6 +378,54 @@ clean:
 	rm -f results.sarif
 	$(call print_success,Clean completed!)
 
+# =============================================================================
+# Web/Node.js Targets
+# =============================================================================
+
+## web-deps: Install npm dependencies
+web-deps:
+	$(call print_info,Installing npm dependencies...)
+	cd web && npm install
+	$(call print_success,npm dependencies installed!)
+
+## web-verify: Verify package.json and package-lock.json are in sync
+web-verify:
+	$(call print_info,Verifying package.json and package-lock.json are in sync...)
+	cd web && npm ci --dry-run
+	$(call print_success,package.json and package-lock.json are in sync!)
+
+## web-test: Run Node.js tests
+web-test:
+	$(call print_info,Running Node.js tests...)
+	cd web && npm test
+	$(call print_success,Node.js tests completed!)
+
+## web-lint: Run ESLint
+web-lint:
+	$(call print_info,Running ESLint...)
+	cd web && npm run lint
+	$(call print_success,ESLint completed!)
+
+## web-security: Run npm audit and security checks
+web-security:
+	$(call print_info,Running npm security checks...)
+	cd web && npm run security:check
+	$(call print_success,Security checks completed!)
+
+## web-build: Build the frontend
+web-build:
+	$(call print_info,Building frontend...)
+	cd web && npm run build
+	$(call print_success,Frontend build completed!)
+
+## web-clean: Clean web build artifacts
+web-clean:
+	$(call print_info,Cleaning web build artifacts...)
+	rm -rf web/dist
+	rm -rf web/node_modules/.cache
+	rm -f web/coverage
+	$(call print_success,Web build artifacts cleaned!)
+
 ## clean-template: Clean up template code and prepare for new project development
 clean-template:
 	$(call print_info,Cleaning up template code...)
@@ -650,11 +698,11 @@ next-rc-version:
 # =============================================================================
 
 ## all: Run all quality checks
-all: deps test lint security vulnerability-check mod-tidy-check
+all: deps test lint security vulnerability-check mod-tidy-check web-deps web-test web-lint web-security web-verify
 	$(call print_success,All quality checks passed!)
 
 ## ci-local: Run the same checks as CI pipeline
-ci-local: all build
+ci-local: all build web-build
 	$(call print_success,Local CI pipeline completed successfully!)
 
 # Default target

@@ -51,3 +51,23 @@ repos:
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
+
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v9.35.0
+    hooks:
+      - id: eslint
+        files: ^web/.*\.js$
+        types: [file]
+        additional_dependencies:
+          - eslint@^9.35.0
+          - '@eslint/js@^9.35.0'
+        args: ['--fix']
+
+  - repo: local
+    hooks:
+      - id: npm-package-lock
+        name: Check package-lock.json is up to date
+        entry: bash -c 'cd web && npm ci --dry-run'
+        language: system
+        files: ^web/package\.json$
+        pass_filenames: false

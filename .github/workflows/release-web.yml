@@ -1,0 +1,76 @@
+name: Release Web Frontend
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-rc*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.tool-versions'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+      - name: Install dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ./web
+        run: npm test
+
+      - name: Build and package frontend
+        id: package
+        working-directory: ./web
+        run: |
+          PACKAGE_FILE=$(bash scripts/package-release.sh "v${{ steps.version.outputs.version }}" | tail -1)
+          PACKAGE_NAME=$(basename "${PACKAGE_FILE}")
+          # Copy to workspace root for GitHub release
+          cp "${PACKAGE_FILE}" "../${PACKAGE_NAME}"
+          echo "package_file=${PACKAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "package_path=${PACKAGE_FILE}" >> $GITHUB_OUTPUT
+          echo "Package created: ${PACKAGE_FILE}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.package_file }}
+          tag_name: ${{ github.ref_name }}
+          name: "Frontend Release ${{ github.ref_name }}"
+          body: |
+            ## Frontend Deployment Package
+            
+            This release contains the built frontend for deployment to SPA/PWA hosts like Cloudflare Pages.
+            
+            ### Download
+            - **Deployment Package**: smart-todo-web-${{ steps.version.outputs.version }}.tar.gz
+            
+            ### Installation
+            Extract the tarball and deploy the contents to your hosting provider.
+            
+            See the package README for detailed deployment instructions.
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') }}

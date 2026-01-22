@@ -38,11 +38,15 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 ### Prerequisites
 
 - Go 1.21 or later
+- Node.js 18+ (for frontend development)
 - Git
-- golangci-lint (for linting)
+- golangci-lint (for Go linting)
+- ESLint (for JavaScript linting, installed via npm)
 - GoReleaser (for testing releases)
 
 ### Local Development
+
+**Backend (Go):**
 
 ```bash
 # Clone your fork
@@ -62,6 +66,38 @@ golangci-lint run
 go build -o ./bin/app ./
 ```
 
+**Frontend (Node.js):**
+
+```bash
+# Navigate to web directory
+cd web
+
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Run linter
+npm run lint
+
+# Build for development
+npm run dev
+
+# Build for production
+npm run build
+```
+
+**Using Makefile (runs both backend and frontend checks):**
+
+```bash
+# Run all quality checks (backend + frontend)
+make all
+
+# Run CI pipeline locally
+make ci-local
+```
+
 ## Coding Standards
 
 ### Go Style Guide
@@ -71,12 +107,27 @@ go build -o ./bin/app ./
 - Run `golangci-lint run` before submitting
 - Write meaningful commit messages
 
+### JavaScript Style Guide
+
+- Follow ESLint rules (configured in `web/.eslintrc.json`)
+- Use `npm run lint:fix` to auto-fix issues
+- Use `const` for variables that are not reassigned
+- Prefer ES6 modules and modern JavaScript features
+- Write meaningful commit messages
+
 ### Testing
 
+**Backend (Go):**
 - Write unit tests for new functionality
 - Maintain or improve test coverage
 - Use table-driven tests where appropriate
 - Mock external dependencies
+
+**Frontend (JavaScript):**
+- Write unit tests using Node.js built-in test runner
+- Maintain or improve test coverage (use `npm run test:coverage`)
+- Test both success and error paths
+- Use `node --test` for test execution
 
 ### Documentation
 
