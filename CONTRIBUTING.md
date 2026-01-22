@@ -109,7 +109,7 @@ make ci-local
 
 ### JavaScript Style Guide
 
-- Follow ESLint rules (configured in `web/.eslintrc.json`)
+- Follow ESLint rules (configured in `web/eslint.config.js`)
 - Use `npm run lint:fix` to auto-fix issues
 - Use `const` for variables that are not reassigned
 - Prefer ES6 modules and modern JavaScript features
