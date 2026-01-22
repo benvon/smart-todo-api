@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,16 +13,26 @@ import (
 	"github.com/google/uuid"
 )
 
+// contains checks if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
 // mockJobQueueForReprocessor is a mock implementation of JobQueue for reprocessor tests
 type mockJobQueueForReprocessor struct {
+	t           *testing.T
 	enqueueFunc func(ctx context.Context, job *queue.Job) error
+	
+	// Call tracking
+	enqueueCalls []*queue.Job
 }
 
 func (m *mockJobQueueForReprocessor) Enqueue(ctx context.Context, job *queue.Job) error {
-	if m.enqueueFunc != nil {
-		return m.enqueueFunc(ctx, job)
+	m.enqueueCalls = append(m.enqueueCalls, job)
+	if m.enqueueFunc == nil {
+		m.t.Fatal("Enqueue called but not configured in test - mock requires explicit setup")
 	}
-	return nil
+	return m.enqueueFunc(ctx, job)
 }
 
 func (m *mockJobQueueForReprocessor) Dequeue(ctx context.Context) (*queue.Message, error) {
@@ -41,25 +52,29 @@ var _ queue.JobQueue = (*mockJobQueueForReprocessor)(nil)
 
 // mockUserActivityRepoForReprocessor is a mock implementation of UserActivityRepositoryInterface for reprocessor tests
 type mockUserActivityRepoForReprocessor struct {
-	getByUserIDFunc                     func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
+	t                                  *testing.T
+	getByUserIDFunc                    func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
 	getEligibleUsersForReprocessingFunc func(ctx context.Context) ([]uuid.UUID, error)
+	
+	// Call tracking
+	getByUserIDCalls                    []uuid.UUID
+	getEligibleUsersForReprocessingCalls int
 }
 
 func (m *mockUserActivityRepoForReprocessor) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error) {
-	if m.getByUserIDFunc != nil {
-		return m.getByUserIDFunc(ctx, userID)
+	m.getByUserIDCalls = append(m.getByUserIDCalls, userID)
+	if m.getByUserIDFunc == nil {
+		m.t.Fatal("GetByUserID called but not configured in test - mock requires explicit setup")
 	}
-	return &models.UserActivity{
-		UserID:             userID,
-		ReprocessingPaused: false,
-	}, nil
+	return m.getByUserIDFunc(ctx, userID)
 }
 
 func (m *mockUserActivityRepoForReprocessor) GetEligibleUsersForReprocessing(ctx context.Context) ([]uuid.UUID, error) {
-	if m.getEligibleUsersForReprocessingFunc != nil {
-		return m.getEligibleUsersForReprocessingFunc(ctx)
+	m.getEligibleUsersForReprocessingCalls++
+	if m.getEligibleUsersForReprocessingFunc == nil {
+		m.t.Fatal("GetEligibleUsersForReprocessing called but not configured in test - mock requires explicit setup")
 	}
-	return []uuid.UUID{}, nil
+	return m.getEligibleUsersForReprocessingFunc(ctx)
 }
 
 // Ensure mock implements interface
@@ -152,7 +167,10 @@ func TestReprocessor_ScheduleReprocessingJobs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			// Create mocks with test context
 			jobQueue, activityRepo := tt.setupMocks()
+			jobQueue.t = t
+			activityRepo.t = t
 
 			reprocessor := NewReprocessor(jobQueue, activityRepo)
 
@@ -161,6 +179,11 @@ func TestReprocessor_ScheduleReprocessingJobs(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got nil")
+				} else {
+					// Validate error is meaningful
+					if err.Error() == "" {
+						t.Error("Expected error message but got empty string")
+					}
 				}
 			} else {
 				if err != nil {
@@ -225,14 +248,27 @@ func TestReprocessor_GetEligibleUsers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			// Create mocks with test context
 			activityRepo := tt.setupMocks()
-			reprocessor := NewReprocessor(&mockJobQueueForReprocessor{}, activityRepo)
+			activityRepo.t = t
+			jobQueue := &mockJobQueueForReprocessor{}
+			jobQueue.t = t
+			reprocessor := NewReprocessor(jobQueue, activityRepo)
 
 			got, err := reprocessor.GetEligibleUsers(context.Background())
 
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got nil")
+				} else {
+					// Validate error is meaningful
+					if err.Error() == "" {
+						t.Error("Expected error message but got empty string")
+					}
+					// Check error message contains expected content
+					if !contains(err.Error(), "database") && !contains(err.Error(), "error") {
+						t.Logf("Error message: %s", err.Error())
+					}
 				}
 			} else {
 				if err != nil {
@@ -312,18 +348,35 @@ func TestReprocessor_createReprocessingJob(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			// Create mocks with test context
 			jobQueue := tt.setupMocks()
-			reprocessor := NewReprocessor(jobQueue, &mockUserActivityRepoForReprocessor{})
+			jobQueue.t = t
+			activityRepo := &mockUserActivityRepoForReprocessor{}
+			activityRepo.t = t
+			reprocessor := NewReprocessor(jobQueue, activityRepo)
 
 			err := reprocessor.createReprocessingJob(context.Background(), tt.userID, tt.notBefore)
 
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got nil")
+				} else {
+					// Validate error is meaningful
+					if err.Error() == "" {
+						t.Error("Expected error message but got empty string")
+					}
+					// Check error message contains expected content
+					if !contains(err.Error(), "queue") && !contains(err.Error(), "error") {
+						t.Logf("Error message: %s", err.Error())
+					}
 				}
 			} else {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
+				}
+				// Validate job was created correctly if validateJob is provided
+				if tt.validateJob != nil && len(jobQueue.enqueueCalls) > 0 {
+					tt.validateJob(t, jobQueue.enqueueCalls[0])
 				}
 			}
 		})
