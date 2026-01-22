@@ -66,7 +66,7 @@ jobs:
             This release contains the built frontend for deployment to SPA/PWA hosts like Cloudflare Pages.
             
             ### Download
-            - **Deployment Package**: smart-todo-web-${{ steps.version.outputs.version }}.tar.gz
+            - **Deployment Package**: smart-todo-web-v${{ steps.version.outputs.version }}.tar.gz
             
             ### Installation
             Extract the tarball and deploy the contents to your hosting provider.
