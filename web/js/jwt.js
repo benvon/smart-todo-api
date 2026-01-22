@@ -66,3 +66,16 @@ function getTokenExpiration(token) {
     
     return new Date(payload.exp * 1000);
 }
+
+// Export functions for ES module use
+export { storeToken, getToken, removeToken, parseToken, isTokenExpired, getTokenExpiration };
+
+// Expose functions globally for backward compatibility
+if (typeof window !== 'undefined') {
+    window.storeToken = storeToken;
+    window.getToken = getToken;
+    window.removeToken = removeToken;
+    window.parseToken = parseToken;
+    window.isTokenExpired = isTokenExpired;
+    window.getTokenExpiration = getTokenExpiration;
+}

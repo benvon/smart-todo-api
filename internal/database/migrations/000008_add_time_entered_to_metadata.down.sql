@@ -1,0 +1,3 @@
+-- Migration 000008: Add time_entered to metadata (rollback)
+-- This is a documentation-only migration, so there's nothing to roll back.
+-- The time_entered field in metadata is optional and can remain in existing records.

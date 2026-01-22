@@ -1,15 +1,20 @@
 package config
 
 import (
+	"errors"
+	"fmt"
 	"os"
-	"sync"
+	"strings"
 	"testing"
 )
 
-var envMutex sync.Mutex
+// contains checks if a string contains a substring (case-insensitive)
+func contains(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
 
 func TestLoad(t *testing.T) {
-	t.Parallel()
+	// Do not run in parallel - environment variables are global state
 
 	tests := []struct {
 		name        string
@@ -48,6 +53,12 @@ func TestLoad(t *testing.T) {
 				"SERVER_PORT":  "9090",
 			},
 			expectError: true,
+			validate: func(t *testing.T, cfg *Config) {
+				// This should not be called when expectError is true, but if it is, cfg should be nil
+				if cfg != nil {
+					t.Error("Expected config to be nil when error occurs")
+				}
+			},
 		},
 		{
 			name: "default values",
@@ -103,6 +114,12 @@ func TestLoad(t *testing.T) {
 				"RABBITMQ_URL": "",
 			},
 			expectError: true,
+			validate: func(t *testing.T, cfg *Config) {
+				// This should not be called when expectError is true, but if it is, cfg should be nil
+				if cfg != nil {
+					t.Error("Expected config to be nil when error occurs")
+				}
+			},
 		},
 	}
 
@@ -125,39 +142,43 @@ func TestLoad(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			envMutex.Lock()
 			// Save original env vars for all config-related vars
 			originalEnv := make(map[string]string)
 			for _, key := range allConfigEnvVars {
 				originalEnv[key] = os.Getenv(key)
 			}
 
-			// Clear only the env vars that this test will modify
-			for key := range tt.envVars {
-				_ = os.Unsetenv(key) // Ignore error in test setup
+			// Clear all config-related env vars before setting test-specific ones
+			for _, key := range allConfigEnvVars {
+				if err := os.Unsetenv(key); err != nil {
+					t.Logf("Warning: failed to unset %s: %v", key, err)
+				}
 			}
 
 			// Set test env vars
 			for key, value := range tt.envVars {
 				if value == "" {
-					_ = os.Unsetenv(key) // Ignore error in test setup
+					if err := os.Unsetenv(key); err != nil {
+						t.Logf("Warning: failed to unset %s: %v", key, err)
+					}
 				} else {
-					_ = os.Setenv(key, value) // Ignore error in test setup
+					if err := os.Setenv(key, value); err != nil {
+						t.Fatalf("Failed to set env var %s: %v", key, err)
+					}
 				}
 			}
-			envMutex.Unlock()
 
 			// Cleanup: restore original env vars
 			defer func() {
-				envMutex.Lock()
-				defer envMutex.Unlock()
 				for key, value := range originalEnv {
 					if value != "" {
-						_ = os.Setenv(key, value) // Ignore error in test cleanup
+						if err := os.Setenv(key, value); err != nil {
+							t.Logf("Warning: failed to restore %s: %v", key, err)
+						}
 					} else {
-						_ = os.Unsetenv(key) // Ignore error in test cleanup
+						if err := os.Unsetenv(key); err != nil {
+							t.Logf("Warning: failed to unset %s: %v", key, err)
+						}
 					}
 				}
 			}()
@@ -167,6 +188,23 @@ func TestLoad(t *testing.T) {
 			if tt.expectError {
 				if err == nil {
 					t.Error("Expected error but got nil")
+					return
+				}
+				// Validate error message contains expected content
+				errMsg := err.Error()
+				if errMsg == "" {
+					t.Error("Expected error message but got empty string")
+				}
+				// Check for specific error messages based on test case
+				if tt.name == "missing DATABASE_URL" && !errors.Is(err, fmt.Errorf("DATABASE_URL is required")) {
+					if !contains(errMsg, "DATABASE_URL") {
+						t.Errorf("Expected error to mention DATABASE_URL, got: %s", errMsg)
+					}
+				}
+				if tt.name == "missing RABBITMQ_URL" && !errors.Is(err, fmt.Errorf("RABBITMQ_URL is required")) {
+					if !contains(errMsg, "RABBITMQ_URL") {
+						t.Errorf("Expected error to mention RABBITMQ_URL, got: %s", errMsg)
+					}
 				}
 				return
 			}
@@ -187,7 +225,7 @@ func TestLoad(t *testing.T) {
 }
 
 func TestGetEnv(t *testing.T) {
-	t.Parallel()
+	// Do not run in parallel - environment variables are global state
 
 	tests := []struct {
 		name         string
@@ -214,26 +252,28 @@ func TestGetEnv(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			envMutex.Lock()
 			// Save original value
 			original := os.Getenv(tt.key)
 
 			if tt.value != "" {
-				_ = os.Setenv(tt.key, tt.value) // Ignore error in test setup
+				if err := os.Setenv(tt.key, tt.value); err != nil {
+					t.Fatalf("Failed to set env var %s: %v", tt.key, err)
+				}
 			} else {
-				_ = os.Unsetenv(tt.key) // Ignore error in test setup
+				if err := os.Unsetenv(tt.key); err != nil {
+					t.Logf("Warning: failed to unset %s: %v", tt.key, err)
+				}
 			}
-			envMutex.Unlock()
 
 			defer func() {
-				envMutex.Lock()
-				defer envMutex.Unlock()
 				if original != "" {
-					_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
+					if err := os.Setenv(tt.key, original); err != nil {
+						t.Logf("Warning: failed to restore %s: %v", tt.key, err)
+					}
 				} else {
-					_ = os.Unsetenv(tt.key) // Ignore error in test cleanup
+					if err := os.Unsetenv(tt.key); err != nil {
+						t.Logf("Warning: failed to unset %s: %v", tt.key, err)
+					}
 				}
 			}()
 
@@ -246,7 +286,7 @@ func TestGetEnv(t *testing.T) {
 }
 
 func TestGetEnvBool(t *testing.T) {
-	t.Parallel()
+	// Do not run in parallel - environment variables are global state
 
 	tests := []struct {
 		name         string
@@ -294,26 +334,28 @@ func TestGetEnvBool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			envMutex.Lock()
 			// Save original value
 			original := os.Getenv(tt.key)
 
 			if tt.value != "" {
-				_ = os.Setenv(tt.key, tt.value) // Ignore error in test setup
+				if err := os.Setenv(tt.key, tt.value); err != nil {
+					t.Fatalf("Failed to set env var %s: %v", tt.key, err)
+				}
 			} else {
-				_ = os.Unsetenv(tt.key) // Ignore error in test setup
+				if err := os.Unsetenv(tt.key); err != nil {
+					t.Logf("Warning: failed to unset %s: %v", tt.key, err)
+				}
 			}
-			envMutex.Unlock()
 
 			defer func() {
-				envMutex.Lock()
-				defer envMutex.Unlock()
 				if original != "" {
-					_ = os.Setenv(tt.key, original) // Ignore error in test cleanup
+					if err := os.Setenv(tt.key, original); err != nil {
+						t.Logf("Warning: failed to restore %s: %v", tt.key, err)
+					}
 				} else {
-					_ = os.Unsetenv(tt.key) // Ignore error in test cleanup
+					if err := os.Unsetenv(tt.key); err != nil {
+						t.Logf("Warning: failed to unset %s: %v", tt.key, err)
+					}
 				}
 			}()
 

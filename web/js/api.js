@@ -263,3 +263,35 @@ async function checkAPIHealth() {
         return { status: 'offline', error: error.message };
     }
 }
+
+// Export functions for ES module use
+export {
+    handleAuthError,
+    apiRequest,
+    getOIDCLoginConfig,
+    getCurrentUser,
+    getTodos,
+    createTodo,
+    updateTodo,
+    deleteTodo,
+    completeTodo,
+    analyzeTodo,
+    sendChatMessage,
+    checkAPIHealth,
+};
+
+// Expose functions globally for backward compatibility
+if (typeof window !== 'undefined') {
+    window.handleAuthError = handleAuthError;
+    window.apiRequest = apiRequest;
+    window.getOIDCLoginConfig = getOIDCLoginConfig;
+    window.getCurrentUser = getCurrentUser;
+    window.getTodos = getTodos;
+    window.createTodo = createTodo;
+    window.updateTodo = updateTodo;
+    window.deleteTodo = deleteTodo;
+    window.completeTodo = completeTodo;
+    window.analyzeTodo = analyzeTodo;
+    window.sendChatMessage = sendChatMessage;
+    window.checkAPIHealth = checkAPIHealth;
+}

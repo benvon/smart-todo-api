@@ -14,9 +14,9 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 		jsonStr  string
 	}{
 		{
-			name: "empty metadata",
+			name:     "empty metadata",
 			metadata: Metadata{},
-			jsonStr: `{}`,
+			jsonStr:  `{}`,
 		},
 		{
 			name: "with category tags",
@@ -55,6 +55,24 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 				Duration:     stringPtr("1h"),
 			},
 			jsonStr: `{"category_tags":["work"],"priority":"medium","context":["office"],"duration":"1h"}`,
+		},
+		{
+			name: "with time_entered",
+			metadata: Metadata{
+				TimeEntered: stringPtr("2024-03-15T14:30:00Z"),
+			},
+			jsonStr: `{"time_entered":"2024-03-15T14:30:00Z"}`,
+		},
+		{
+			name: "all fields including time_entered",
+			metadata: Metadata{
+				CategoryTags: []string{"work"},
+				Priority:     stringPtr("high"),
+				Context:      []string{"home"},
+				Duration:     stringPtr("30m"),
+				TimeEntered:  stringPtr("2024-03-15T14:30:00Z"),
+			},
+			jsonStr: `{"category_tags":["work"],"priority":"high","context":["home"],"duration":"30m","time_entered":"2024-03-15T14:30:00Z"}`,
 		},
 	}
 
@@ -170,6 +188,13 @@ func metadataEqual(a, b Metadata) bool {
 		return false
 	}
 	if a.Duration != nil && b.Duration != nil && *a.Duration != *b.Duration {
+		return false
+	}
+
+	if (a.TimeEntered == nil) != (b.TimeEntered == nil) {
+		return false
+	}
+	if a.TimeEntered != nil && b.TimeEntered != nil && *a.TimeEntered != *b.TimeEntered {
 		return false
 	}
 

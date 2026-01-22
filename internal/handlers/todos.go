@@ -8,20 +8,20 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
-	"github.com/gorilla/mux"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/validation"
+	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 )
 
 // TodoHandler handles todo-related requests
 type TodoHandler struct {
-	todoRepo  *database.TodoRepository
-	jobQueue  queue.JobQueue // Optional - if nil, job enqueueing is disabled
+	todoRepo *database.TodoRepository
+	jobQueue queue.JobQueue // Optional - if nil, job enqueueing is disabled
 }
 
 // NewTodoHandler creates a new todo handler
@@ -68,11 +68,11 @@ type CreateTodoRequest struct {
 
 // UpdateTodoRequest represents an update todo request
 type UpdateTodoRequest struct {
-	Text        *string              `json:"text,omitempty"`
-	TimeHorizon *models.TimeHorizon  `json:"time_horizon,omitempty"`
-	Status      *models.TodoStatus   `json:"status,omitempty"`
-	Tags        *[]string            `json:"tags,omitempty"` // User-defined tags (overrides AI tags)
-	DueDate     *string              `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
+	Text        *string             `json:"text,omitempty"`
+	TimeHorizon *models.TimeHorizon `json:"time_horizon,omitempty"`
+	Status      *models.TodoStatus  `json:"status,omitempty"`
+	Tags        *[]string           `json:"tags,omitempty"`     // User-defined tags (overrides AI tags)
+	DueDate     *string             `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
 }
 
 // ListTodosResponse represents the paginated response for listing todos
@@ -204,14 +204,17 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	now := time.Now()
+	timeEntered := now.Format(time.RFC3339)
 	todo := &models.Todo{
 		ID:          uuid.New(),
 		UserID:      user.ID,
 		Text:        req.Text,
 		TimeHorizon: models.TimeHorizonSoon, // Default to 'soon'
 		Status:      models.TodoStatusPending,
-		Metadata:    models.Metadata{
-			TagSources: make(map[string]models.TagSource),
+		Metadata: models.Metadata{
+			TagSources:  make(map[string]models.TagSource),
+			TimeEntered: &timeEntered,
 		},
 	}
 
@@ -494,7 +497,7 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 			respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to enqueue analysis job")
 			return
 		}
-		
+
 		log.Printf("Enqueued AI analysis job for todo %s (user %s) via manual trigger", todo.ID, user.ID)
 		respondJSON(w, http.StatusAccepted, map[string]string{
 			"message": "Analysis job enqueued",

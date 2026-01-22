@@ -11,10 +11,10 @@ import (
 type AIProvider interface {
 	// AnalyzeTask analyzes a task and returns suggested tags and time horizon
 	AnalyzeTask(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
-	
+
 	// Chat handles a chat message and returns the AI response
 	Chat(ctx context.Context, messages []ChatMessage, userContext *models.AIContext) (*ChatResponse, error)
-	
+
 	// SummarizeContext summarizes a conversation history into a context summary
 	SummarizeContext(ctx context.Context, conversationHistory []ChatMessage) (string, error)
 }
@@ -22,8 +22,9 @@ type AIProvider interface {
 // AIProviderWithDueDate is an optional interface for providers that support due date analysis
 type AIProviderWithDueDate interface {
 	AIProvider
-	// AnalyzeTaskWithDueDate analyzes a task with an optional due date and returns suggested tags and time horizon
-	AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
+	// AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon
+	// createdAt is when the todo was created/entered, used for understanding relative time expressions
+	AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
 }
 
 // ChatMessage represents a message in a chat conversation
@@ -35,7 +36,7 @@ type ChatMessage struct {
 // ChatResponse represents a response from the AI chat
 type ChatResponse struct {
 	Message     string `json:"message"`
-	Summary     string `json:"summary,omitempty"` // Optional summary of the conversation
+	Summary     string `json:"summary,omitempty"`      // Optional summary of the conversation
 	NeedsUpdate bool   `json:"needs_update,omitempty"` // Whether context needs updating
 }
 
@@ -65,7 +66,7 @@ func (r *ProviderRegistry) GetProvider(name string, config map[string]string) (A
 	if !ok {
 		return nil, &ErrProviderNotFound{Name: name}
 	}
-	
+
 	return factory(config)
 }
 

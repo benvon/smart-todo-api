@@ -1,57 +1,81 @@
 # Frontend JavaScript Dependencies
 
-## File Dependency Graph
+## Build System
+
+The frontend uses a modern build system with npm and esbuild. All JavaScript files are bundled into `dist/` directory.
+
+### Dependencies
+
+**Production Dependencies:**
+- `chrono-node` - Natural language date parsing library
+- `dayjs` - Lightweight date manipulation and formatting library
+
+**Development Dependencies:**
+- `esbuild` - Fast JavaScript bundler
+
+### Building
+
+```bash
+# Install dependencies (first time only)
+cd web
+npm install
+
+# Build for production
+npm run build
+
+# Build in watch mode for development
+npm run dev
+```
+
+Build output is in `web/dist/`:
+- `dist/app.js` - Main application bundle (used by app.html)
+- `dist/index.js` - Login page bundle (used by index.html)
+
+### File Dependency Graph
 
 ```
-config.js (no deps)
-  └─ Sets window.API_BASE_URL
+app-entry.js
+  ├─ config.js (sets window.API_BASE_URL)
+  ├─ jwt.js (token utilities)
+  ├─ dateutils.js (uses chrono-node, dayjs)
+  ├─ api.js (API client)
+  ├─ auth.js (auth flow)
+  ├─ chat.js (chat functionality)
+  └─ app.js (main app logic)
 
-jwt.js (no deps)
-  └─ Defines: storeToken, getToken, removeToken, isTokenExpired, parseToken, getTokenExpiration
-
-api.js (depends on: jwt.js, config.js)
-  ├─ Uses: getToken, window.API_BASE_URL
-  └─ Defines: apiRequest, getOIDCLoginConfig, getCurrentUser, getTodos, createTodo, updateTodo, deleteTodo, completeTodo
-
-auth.js (depends on: api.js, jwt.js)
-  ├─ Uses: getOIDCLoginConfig, storeToken, getToken, isTokenExpired, removeToken
-  └─ Defines: initiateLogin, handleCallback, exchangeCodeForToken, logout, isAuthenticated, generateState, showError
-
-app.js (depends on: auth.js, api.js)
-  ├─ Uses: handleCallback, initiateLogin, isAuthenticated, logout, getTodos, createTodo, completeTodo, deleteTodo
-  └─ Defines: loadTodos, handleAddTodo, handleCompleteTodo, handleDeleteTodo, renderTodos, renderTodoList, escapeHtml, showError
+index-entry.js
+  ├─ config.js
+  ├─ jwt.js
+  ├─ api.js
+  ├─ auth.js
+  └─ app.js
 ```
 
-## Required Script Load Order
+**Note**: The build system bundles all dependencies, so HTML files only need to load the single bundle file (`dist/app.js` or `dist/index.js`).
 
-**index.html and app.html must load scripts in this order:**
-1. `config.js` - Sets API base URL (no dependencies)
-2. `jwt.js` - Token utilities (no dependencies)  
-3. `api.js` - API client (needs jwt.js, config.js)
-4. `auth.js` - Auth flow (needs api.js, jwt.js)
-5. `app.js` - App logic (needs auth.js, api.js)
+## Module Structure
 
-## Function Usage Matrix
+All JavaScript files are ES6 modules that export functions and also expose them globally for backward compatibility. The build system bundles these modules together.
 
-| Function | Defined In | Used By |
-|----------|-----------|---------|
-| `storeToken` | jwt.js | auth.js:75 |
-| `getToken` | jwt.js | api.js:7, auth.js:151 |
-| `removeToken` | jwt.js | auth.js:143, auth.js:157 |
-| `isTokenExpired` | jwt.js | auth.js:156 |
-| `getOIDCLoginConfig` | api.js | auth.js:8, auth.js:66 |
-| `apiRequest` | api.js | api.js:66, api.js:73, api.js:90, api.js:100, api.js:110, api.js:119 |
-| `initiateLogin` | auth.js | app.js:19 |
-| `handleCallback` | auth.js | app.js:12 |
-| `logout` | auth.js | app.js:33 |
-| `isAuthenticated` | auth.js | app.js:25 |
-| `getTodos` | api.js | app.js:61 |
-| `createTodo` | api.js | app.js:82 |
-| `completeTodo` | api.js | app.js:97 |
-| `deleteTodo` | api.js | app.js:122 |
-| `showError` | auth.js, app.js | auth.js:35, auth.js:49, auth.js:60, auth.js:79, auth.js:83, app.js:66, app.js:88, app.js:109, app.js:129 |
+### Key Modules
 
-## Potential Issues
+- **dateutils.js** - Date parsing and formatting using chrono-node and dayjs
+  - `parseNaturalDate()` - Parse natural language dates
+  - `formatDate()` - Format dates for display
+  - `extractDateFromText()` - Extract dates from todo text
+  - `isDateOnly()` - Check if a date is date-only (no time)
 
-1. **Duplicate `showError` function** - Defined in both `auth.js` and `app.js`. This should work but is redundant.
-2. **Global scope functions** - All functions are global. Consider namespacing for better organization.
+- **config.js** - API configuration loader
+- **jwt.js** - JWT token management
+- **api.js** - API client functions
+- **auth.js** - OIDC authentication flow
+- **chat.js** - AI chat interface
+- **app.js** - Main application logic
+
+## Deployment
+
+When deploying, ensure:
+1. Build the frontend: `npm run build`
+2. Include `dist/app.js` and `dist/index.js` in deployment
+3. Deploy `config.json` with correct `api_base_url`
+4. All other static assets (CSS, HTML, manifest.json) are included
