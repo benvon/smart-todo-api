@@ -28,3 +28,6 @@ window.CONFIG_LOADED = (async function loadConfig() {
         console.warn('Failed to load config.json, using default API URL:', DEFAULT_API_BASE_URL, error);
     }
 })();
+
+// Export for ES module use (though config is primarily used via window globals)
+export { DEFAULT_API_BASE_URL };

@@ -1,0 +1,18 @@
+{
+  "name": "smart-todo-web",
+  "version": "1.0.0",
+  "description": "Smart Todo frontend reference implementation",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.config.js",
+    "dev": "node esbuild.config.js --watch",
+    "test": "node --test js/**/*.test.js"
+  },
+  "dependencies": {
+    "chrono-node": "^2.7.8",
+    "dayjs": "^1.11.13"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}

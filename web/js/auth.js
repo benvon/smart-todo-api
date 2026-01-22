@@ -180,3 +180,17 @@ function showError(message) {
         errorEl.style.display = 'block';
     }
 }
+
+// Export functions for ES module use
+export { initiateLogin, handleCallback, exchangeCodeForToken, logout, isAuthenticated, generateState, showError };
+
+// Expose functions globally for backward compatibility
+if (typeof window !== 'undefined') {
+    window.initiateLogin = initiateLogin;
+    window.handleCallback = handleCallback;
+    window.exchangeCodeForToken = exchangeCodeForToken;
+    window.logout = logout;
+    window.isAuthenticated = isAuthenticated;
+    window.generateState = generateState;
+    window.showError = showError;
+}

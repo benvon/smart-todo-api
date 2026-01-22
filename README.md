@@ -127,10 +127,13 @@ docker-compose down
    # Terminal 2: Start the worker (required for AI features)
    go run ./cmd/worker
    
-   # Terminal 3: Serve the frontend
+   # Terminal 3: Build and serve the frontend
    cd web
    cp config.json.example config.json
    # Edit config.json to set api_base_url
+   npm install
+   npm run build
+   # Serve the built files (or use any static file server)
    python3 -m http.server 3000
    ```
 
@@ -145,7 +148,7 @@ The API will be available at `http://localhost:8080` and the frontend at `http:/
 #### Developer Prerequisites
 
 - **Go 1.25+** - [Install Go](https://go.dev/doc/install)
-- **Node.js** (optional, for frontend build tooling if needed)
+- **Node.js 18+** - [Install Node.js](https://nodejs.org/) - Required for frontend build system
 
 #### Getting Started
 
@@ -223,6 +226,8 @@ make all
 
 #### Building
 
+**Backend:**
+
 ```bash
 # Build server
 go build -o bin/smart-todo-server ./cmd/server
@@ -236,6 +241,33 @@ go build -o bin/smart-todo-configure ./cmd/configure
 # Build for multiple platforms
 make build
 ```
+
+**Frontend:**
+
+```bash
+# Navigate to web directory
+cd web
+
+# Install dependencies (first time only)
+npm install
+
+# Build for production
+npm run build
+
+# Build in watch mode for development (auto-rebuilds on changes)
+npm run dev
+
+# Run tests (when implemented)
+npm test
+```
+
+The frontend build system:
+- Bundles all JavaScript files using esbuild
+- Outputs to `web/dist/` directory
+- Creates separate bundles: `dist/app.js` (for app.html) and `dist/index.js` (for index.html)
+- Generates source maps for debugging
+- Uses chrono-node for natural language date parsing
+- Uses dayjs for date formatting and manipulation
 
 #### Database Migrations
 
@@ -319,6 +351,21 @@ The frontend loads its configuration from `web/config.json`:
 
 This file should be deployed with the correct API URL for each environment.
 
+**Frontend Build System:**
+
+The frontend uses a modern build system with:
+- **esbuild** - Fast JavaScript bundler
+- **chrono-node** - Natural language date parsing
+- **dayjs** - Lightweight date manipulation library
+
+Build configuration is in `web/esbuild.config.js`. The build system:
+- Bundles all JavaScript files into `web/dist/`
+- Generates source maps for debugging
+- Supports watch mode for development (`npm run dev`)
+- Creates separate bundles for login page (`index.js`) and app page (`app.js`)
+
+All build artifacts are in `web/dist/` and should be included in deployments.
+
 #### OIDC Configuration
 
 OIDC configuration is stored in the database and managed via the CLI tool. The provider name can be any identifier (e.g., `cognito`, `okta`, `auth0`):
@@ -388,13 +435,49 @@ docker run \
 
 The frontend is a static Progressive Web App that can be deployed to:
 
+- Cloudflare Pages
 - Netlify
 - Vercel
 - AWS S3 + CloudFront
 - GitHub Pages
 - Any static file hosting service
 
-**Important**: Deploy `web/config.json` with the correct `api_base_url` for your environment.
+**Building the Frontend:**
+
+The frontend uses a build system with esbuild for bundling JavaScript files. To build the frontend:
+
+```bash
+# Navigate to the web directory
+cd web
+
+# Install dependencies (first time only)
+npm install
+
+# Build for production
+npm run build
+
+# Or run in watch mode for development
+npm run dev
+```
+
+The build output will be in `web/dist/`:
+- `dist/app.js` - Main application bundle (for app.html)
+- `dist/index.js` - Login page bundle (for index.html)
+
+**Deployment Steps:**
+
+1. Build the frontend: `cd web && npm install && npm run build`
+2. Deploy the contents of the `web/` directory, including:
+   - `dist/` - Built JavaScript bundles
+   - `index.html` and `app.html` - HTML files (updated to use bundled JS)
+   - `css/` - Stylesheets
+   - `config.json` - API configuration (with correct `api_base_url`)
+   - `manifest.json` - PWA manifest
+
+**Important**: 
+- Deploy `web/config.json` with the correct `api_base_url` for your environment
+- Ensure `dist/app.js` and `dist/index.js` are included in deployment
+- The build system is self-contained within the `web/` directory
 
 #### Kubernetes Deployment
 
@@ -449,6 +532,8 @@ psql "$DATABASE_URL" -c "SELECT provider, issuer FROM oidc_config;"
 2. Verify backend is running and accessible
 3. Check browser console for CORS errors
 4. Verify `FRONTEND_URL` environment variable matches frontend URL
+5. Ensure frontend is built: `cd web && npm install && npm run build`
+6. Verify `dist/app.js` and `dist/index.js` exist and are being served
 
 #### AI Features Not Working
 

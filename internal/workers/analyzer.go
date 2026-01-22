@@ -81,18 +81,32 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		}
 	}
 
+	// Get creation time from metadata if available, otherwise use CreatedAt
+	createdAt := todo.CreatedAt
+	if todo.Metadata.TimeEntered != nil && *todo.Metadata.TimeEntered != "" {
+		if parsedTime, parseErr := time.Parse(time.RFC3339, *todo.Metadata.TimeEntered); parseErr == nil {
+			createdAt = parsedTime
+		}
+		// If parsing fails, fall back to CreatedAt
+	}
+
 	// Analyze task (with due date if available)
 	var tags []string
 	var timeHorizon models.TimeHorizon
 	// Check if provider supports due date analysis
 	if todo.DueDate != nil {
 		if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, userContext)
+			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext)
 		} else {
 			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
 		}
 	} else {
-		tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+		// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time
+		if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
+			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext)
+		} else {
+			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+		}
 	}
 	if err != nil {
 		// On error, set status back to pending so it can be retried
@@ -166,17 +180,31 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 		existingUserTags := todo.Metadata.GetUserTags()
 		originalTimeHorizon := todo.TimeHorizon
 
+		// Get creation time from metadata if available, otherwise use CreatedAt
+		createdAt := todo.CreatedAt
+		if todo.Metadata.TimeEntered != nil && *todo.Metadata.TimeEntered != "" {
+			if parsedTime, parseErr := time.Parse(time.RFC3339, *todo.Metadata.TimeEntered); parseErr == nil {
+				createdAt = parsedTime
+			}
+			// If parsing fails, fall back to CreatedAt
+		}
+
 		// Analyze task (with due date if available)
 		var tags []string
 		var timeHorizon models.TimeHorizon
 		if todo.DueDate != nil {
 			if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, userContext)
+				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext)
 			} else {
 				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
 			}
 		} else {
-			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+			// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time
+			if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
+				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext)
+			} else {
+				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+			}
 		}
 		if err != nil {
 			log.Printf("Failed to analyze todo %s: %v", todo.ID, err)

@@ -82,13 +82,14 @@ func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *O
 
 // AnalyzeTask analyzes a task and returns suggested tags and time horizon
 func (p *OpenAIProvider) AnalyzeTask(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
-	return p.AnalyzeTaskWithDueDate(ctx, text, nil, userContext)
+	// Use current time as creation time when not provided
+	return p.AnalyzeTaskWithDueDate(ctx, text, nil, time.Now(), userContext)
 }
 
-// AnalyzeTaskWithDueDate analyzes a task with an optional due date and returns suggested tags and time horizon
-func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
-	// Build prompt with user context and due date if available
-	prompt := p.buildAnalysisPrompt(text, dueDate, userContext)
+// AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon
+func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+	// Build prompt with user context, due date, and creation time
+	prompt := p.buildAnalysisPrompt(text, dueDate, createdAt, userContext)
 
 	// Build messages
 	messages := []openai.ChatCompletionMessageParamUnion{
@@ -257,22 +258,49 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 	return content, nil
 }
 
-// buildAnalysisPrompt builds the prompt for task analysis
-func (p *OpenAIProvider) buildAnalysisPrompt(text string, dueDate *time.Time, userContext *models.AIContext) string {
+// buildAnalysisPrompt builds the prompt for task analysis with time context
+func (p *OpenAIProvider) buildAnalysisPrompt(text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) string {
+	now := time.Now()
+
 	prompt := fmt.Sprintf(`Analyze the following todo item and suggest:
 1. Relevant tags (as a JSON array of strings)
 2. Time horizon: "next", "soon", or "later"
 
 Todo item: "%s"`, text)
 
+	// Include time context for better understanding of relative time expressions
+	prompt += "\n\nTime context:"
+	prompt += fmt.Sprintf("\n- Current date and time: %s", now.Format(time.RFC3339))
+	prompt += fmt.Sprintf("\n- Todo created/entered at: %s", createdAt.Format(time.RFC3339))
+
+	// Calculate time since creation
+	timeSinceCreation := now.Sub(createdAt)
+	daysSinceCreation := int(timeSinceCreation.Hours() / 24)
+	switch daysSinceCreation {
+	case 0:
+		prompt += "\n- This todo was entered today."
+	case 1:
+		prompt += "\n- This todo was entered yesterday."
+	default:
+		prompt += fmt.Sprintf("\n- This todo was entered %d days ago.", daysSinceCreation)
+	}
+
 	// Include due date information if available
 	if dueDate != nil {
-		now := time.Now()
 		timeUntil := dueDate.Sub(now)
 		daysUntil := int(timeUntil.Hours() / 24)
-		
-		prompt += fmt.Sprintf("\n\nDue date: %s (in %d days)", dueDate.Format(time.RFC3339), daysUntil)
-		
+
+		// Check if due date is date-only (midnight)
+		isDateOnly := dueDate.Hour() == 0 && dueDate.Minute() == 0 && dueDate.Second() == 0 && dueDate.Nanosecond() == 0
+
+		if isDateOnly {
+			prompt += fmt.Sprintf("\n\nDue date: %s (date only, no specific time)", dueDate.Format("2006-01-02"))
+		} else {
+			prompt += fmt.Sprintf("\n\nDue date: %s (specific time)", dueDate.Format(time.RFC3339))
+		}
+
+		prompt += fmt.Sprintf(" (in %d days)", daysUntil)
+
 		// Provide guidance based on due date
 		if daysUntil < 0 {
 			prompt += "\nNote: This item is overdue."
@@ -299,6 +327,8 @@ Guidelines:
 - "later": Items that can wait or are not urgent (typically more than a week away)
 
 Use the due date as a strong signal for time horizon categorization. Items with earlier due dates should typically have higher priority time horizons.
+
+When interpreting relative time expressions in the todo text (like "this weekend", "soon", "next week"), consider when the todo was created. For example, if a todo says "this weekend" and it was created on Monday, "this weekend" refers to the upcoming weekend. If it was created on Saturday, it might refer to today or tomorrow.
 
 Return only valid JSON.`
 

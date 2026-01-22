@@ -97,3 +97,13 @@ function addChatMessage(role, content) {
     // Scroll to bottom
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
+
+// Export functions for ES module use
+export { initChat, handleSendMessage, addChatMessage };
+
+// Expose functions globally for backward compatibility
+if (typeof window !== 'undefined') {
+    window.initChat = initChat;
+    window.handleSendMessage = handleSendMessage;
+    window.addChatMessage = addChatMessage;
+}

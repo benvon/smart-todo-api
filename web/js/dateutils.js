@@ -1,170 +1,135 @@
 // Date utilities for natural language parsing
+// chrono-node: Import as namespace since ESM doesn't have default export
+// esbuild will handle the bundling correctly
+import * as chronoNs from 'chrono-node';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+// Access chrono-node: try default export first, then use namespace
+// When bundled by esbuild, this should resolve correctly
+const chrono = (chronoNs && chronoNs.default) ? chronoNs.default : chronoNs;
+
+// Extend dayjs with plugins
+dayjs.extend(relativeTime);
+dayjs.extend(customParseFormat);
+
+// Expose dayjs and chrono globally for potential use in other scripts
+if (typeof window !== 'undefined') {
+    window.dayjs = dayjs;
+    window.chrono = chrono;
+}
+
+/**
+ * Check if a date string represents a date-only (no specific time)
+ * @param {string} isoString - ISO 8601 date string
+ * @returns {boolean} - True if the date is at midnight (date-only)
+ */
+function isDateOnly(isoString) {
+    if (!isoString) return false;
+    const date = new Date(isoString);
+    return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0 && date.getMilliseconds() === 0;
+}
 
 /**
  * Parse a natural language date string into an ISO 8601 (RFC3339) string
- * Supports formats like:
- * - "tomorrow", "tomorrow at 3pm", "tomorrow at 3:30pm"
- * - "next friday", "next friday at 2pm"
- * - "in 3 days", "in 2 weeks"
- * - "2024-03-15", "March 15, 2024", "03/15/2024"
- * - "today at 5pm", "today"
- * - Standard ISO 8601 formats
+ * Uses chrono-node for natural language parsing
  * @param {string} dateString - Natural language date string
  * @returns {string|null} - ISO 8601 string (RFC3339) or null if parsing fails
  */
-function parseNaturalDate(dateString) {
+export function parseNaturalDate(dateString) {
     if (!dateString || !dateString.trim()) {
         return null;
     }
     
-    const input = dateString.trim().toLowerCase();
-    const now = new Date();
-    let date = new Date();
+    const input = dateString.trim();
     
     // Try parsing as ISO 8601 first
-    const isoDate = new Date(dateString);
-    if (!isNaN(isoDate.getTime()) && dateString.includes('T')) {
+    const isoDate = new Date(input);
+    if (!isNaN(isoDate.getTime()) && input.includes('T')) {
         return isoDate.toISOString();
     }
     
-    // Handle "tomorrow" and variations
-    if (input.startsWith('tomorrow')) {
-        date.setDate(now.getDate() + 1);
-        date.setHours(0, 0, 0, 0);
+    // Use chrono-node for natural language parsing
+    // Use forwardDate option to prefer future dates when ambiguous (e.g., "Friday" on Wednesday = this Friday, not last Friday)
+    const referenceDate = new Date();
+    const results = chrono.parse(input, referenceDate, { forwardDate: true });
+    
+    if (results.length > 0) {
+        const firstResult = results[0];
+        let parsedDate = firstResult.start.date();
         
-        // Check for time specification
-        const timeMatch = input.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-        if (timeMatch) {
-            let hours = parseInt(timeMatch[1], 10);
-            const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-            const ampm = timeMatch[3];
-            
-            if (ampm) {
-                if (ampm === 'pm' && hours !== 12) hours += 12;
-                if (ampm === 'am' && hours === 12) hours = 0;
-            } else if (hours < 12 && input.includes('pm')) {
-                hours += 12;
-            }
-            
-            date.setHours(hours, minutes, 0, 0);
+        // Check if input explicitly contains time keywords
+        // If not, normalize to midnight (date-only) - even if chrono-node set a time from reference date
+        const hasExplicitTime = /\b(at|@|am|pm|morning|afternoon|evening|noon|midnight|\d{1,2}:\d{2})\b/i.test(input);
+        
+        // Also check if chrono-node detected time components in the parsed result
+        // chrono-node might set time from reference date, so we need to check both
+        const parsedHasTime = firstResult.start.get('hour') !== null || 
+                               firstResult.start.get('minute') !== null ||
+                               firstResult.start.get('second') !== null;
+        
+        // Only keep time if it was explicitly provided in the input
+        // For relative dates like "in two weeks", normalize to midnight
+        if (!hasExplicitTime) {
+            parsedDate = new Date(parsedDate);
+            parsedDate.setHours(0, 0, 0, 0);
         }
         
-        return date.toISOString();
-    }
-    
-    // Handle "today"
-    if (input.startsWith('today')) {
-        date = new Date(now);
-        date.setHours(0, 0, 0, 0);
-        
-        const timeMatch = input.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-        if (timeMatch) {
-            let hours = parseInt(timeMatch[1], 10);
-            const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-            const ampm = timeMatch[3];
-            
-            if (ampm) {
-                if (ampm === 'pm' && hours !== 12) hours += 12;
-                if (ampm === 'am' && hours === 12) hours = 0;
-            }
-            
-            date.setHours(hours, minutes, 0, 0);
-        }
-        
-        return date.toISOString();
-    }
-    
-    // Handle "in X days/weeks/months"
-    const inMatch = input.match(/in\s+(\d+)\s+(day|days|week|weeks|month|months)/);
-    if (inMatch) {
-        const amount = parseInt(inMatch[1], 10);
-        const unit = inMatch[2];
-        
-        date = new Date(now);
-        
-        if (unit.startsWith('day')) {
-            date.setDate(now.getDate() + amount);
-        } else if (unit.startsWith('week')) {
-            date.setDate(now.getDate() + (amount * 7));
-        } else if (unit.startsWith('month')) {
-            date.setMonth(now.getMonth() + amount);
-        }
-        
-        date.setHours(0, 0, 0, 0);
-        return date.toISOString();
-    }
-    
-    // Handle "next [day of week]"
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const nextDayMatch = input.match(/next\s+(\w+)/);
-    if (nextDayMatch) {
-        const dayName = nextDayMatch[1];
-        const dayIndex = dayNames.indexOf(dayName);
-        
-        if (dayIndex !== -1) {
-            date = new Date(now);
-            const daysUntil = (dayIndex - now.getDay() + 7) % 7 || 7;
-            date.setDate(now.getDate() + daysUntil);
-            date.setHours(0, 0, 0, 0);
-            
-            // Check for time
-            const timeMatch = input.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-            if (timeMatch) {
-                let hours = parseInt(timeMatch[1], 10);
-                const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-                const ampm = timeMatch[3];
-                
-                if (ampm) {
-                    if (ampm === 'pm' && hours !== 12) hours += 12;
-                    if (ampm === 'am' && hours === 12) hours = 0;
-                }
-                
-                date.setHours(hours, minutes, 0, 0);
-            }
-            
-            return date.toISOString();
-        }
-    }
-    
-    // Try parsing with JavaScript's Date constructor
-    const parsedDate = new Date(dateString);
-    if (!isNaN(parsedDate.getTime())) {
         return parsedDate.toISOString();
+    }
+    
+    // Fallback: try JavaScript's Date constructor
+    const fallbackDate = new Date(input);
+    if (!isNaN(fallbackDate.getTime())) {
+        return fallbackDate.toISOString();
     }
     
     return null;
 }
 
 /**
- * Format a date for display
+ * Format a date for display using dayjs
  * @param {string} isoString - ISO 8601 date string
  * @returns {string} - Formatted date string
  */
-function formatDate(isoString) {
+export function formatDate(isoString) {
     if (!isoString) return '';
     
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return '';
+    const date = dayjs(isoString);
+    if (!date.isValid()) return '';
     
-    const now = new Date();
-    const diffMs = date - now;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const now = dayjs();
+    const diffDays = date.diff(now, 'day');
     
-    // Format time
-    const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    // Check if this is a date-only (no specific time)
+    const dateOnly = isDateOnly(isoString);
     
     // Relative dates for near future
     if (diffDays === 0) {
-        return `Today at ${timeStr}`;
+        if (dateOnly) {
+            return 'Today';
+        }
+        return `Today at ${date.format('h:mm A')}`;
     } else if (diffDays === 1) {
-        return `Tomorrow at ${timeStr}`;
+        if (dateOnly) {
+            return 'Tomorrow';
+        }
+        return `Tomorrow at ${date.format('h:mm A')}`;
     } else if (diffDays > 1 && diffDays <= 7) {
-        const dayName = date.toLocaleDateString([], { weekday: 'long' });
-        return `${dayName} at ${timeStr}`;
+        const dayName = date.format('dddd');
+        if (dateOnly) {
+            return dayName;
+        }
+        return `${dayName} at ${date.format('h:mm A')}`;
     } else {
         // Full date
-        const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric', year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
-        return `${dateStr} at ${timeStr}`;
+        const dateStr = date.format('MMM D');
+        const yearStr = date.year() !== now.year() ? `, ${date.year()}` : '';
+        if (dateOnly) {
+            return `${dateStr}${yearStr}`;
+        }
+        return `${dateStr}${yearStr} at ${date.format('h:mm A')}`;
     }
 }
 
@@ -173,7 +138,7 @@ function formatDate(isoString) {
  * @param {string} dateString - Date string to validate
  * @returns {boolean} - True if valid
  */
-function isValidDate(dateString) {
+export function isValidDate(dateString) {
     if (!dateString || !dateString.trim()) {
         return false;
     }
@@ -182,146 +147,88 @@ function isValidDate(dateString) {
 
 /**
  * Extract date/time information from todo text and return cleaned text with detected date
+ * Uses chrono-node for better natural language parsing
  * @param {string} text - Todo text that may contain date information
- * @returns {object} - { cleanedText: string, detectedDate: string|null }
+ * @returns {object} - { cleanedText: string, detectedDate: string|null, isDateOnly: boolean }
  */
-function extractDateFromText(text) {
+export function extractDateFromText(text) {
     if (!text || !text.trim()) {
-        return { cleanedText: text, detectedDate: null };
+        return { cleanedText: text, detectedDate: null, isDateOnly: false };
     }
     
     const originalText = text.trim();
-    let cleanedText = originalText;
-    let detectedDate = null;
+    const referenceDate = new Date();
     
-    // Patterns to look for (order matters - more specific first)
-    const datePatterns = [
-        // "tomorrow at 3pm", "tomorrow at 3:30pm", "tomorrow"
-        {
-            pattern: /\b(tomorrow(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)\b/gi,
-            parseFn: (match) => parseNaturalDate(match[1])
-        },
-        // "today at 5pm", "today"
-        {
-            pattern: /\b(today(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)\b/gi,
-            parseFn: (match) => parseNaturalDate(match[1])
-        },
-        // "next friday", "next friday at 2pm", "next monday"
-        {
-            pattern: /\b(next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)\b/gi,
-            parseFn: (match) => parseNaturalDate(match[1])
-        },
-        // "in 3 days", "in 2 weeks"
-        {
-            pattern: /\b(in\s+\d+\s+(?:day|days|week|weeks|month|months))\b/gi,
-            parseFn: (match) => parseNaturalDate(match[1])
-        },
-        // "on friday", "on friday at 3pm" (this week's or next week's)
-        {
-            pattern: /\b(on\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)\b/gi,
-            parseFn: (match) => {
-                // Determine if "on friday" means this week's or next week's friday
-                const dayMatch = match[1].match(/on\s+(\w+)/);
-                if (dayMatch) {
-                    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-                    const dayName = dayMatch[1].toLowerCase();
-                    const dayIndex = dayNames.indexOf(dayName);
-                    
-                    if (dayIndex !== -1) {
-                        const now = new Date();
-                        const today = now.getDay();
-                        const daysUntil = (dayIndex - today + 7) % 7;
-                        // If it's today or already past this week, use next week's occurrence
-                        const targetDays = daysUntil === 0 ? 7 : daysUntil;
-                        
-                        const date = new Date(now);
-                        date.setDate(now.getDate() + targetDays);
-                        date.setHours(0, 0, 0, 0);
-                        
-                        // Check for time specification
-                        const timeMatch = match[1].match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-                        if (timeMatch) {
-                            let hours = parseInt(timeMatch[1], 10);
-                            const minutes = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-                            const ampm = timeMatch[3];
-                            
-                            if (ampm) {
-                                if (ampm === 'pm' && hours !== 12) hours += 12;
-                                if (ampm === 'am' && hours === 12) hours = 0;
-                            }
-                            
-                            date.setHours(hours, minutes, 0, 0);
-                        }
-                        
-                        return date.toISOString();
-                    }
-                }
-                return null;
-            }
-        },
-        // Date formats: "March 15", "March 15, 2024", "03/15/2024", "2024-03-15"
-        {
-            pattern: /\b(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,\s+\d{4})?)\b/gi,
-            parseFn: (match) => {
-                const parsed = parseNaturalDate(match[1]);
-                // Only use if it's a future date (not just a year in the past)
-                if (parsed) {
-                    const date = new Date(parsed);
-                    const now = new Date();
-                    // Accept dates from today onwards (allow some past dates that might be typos for this year)
-                    if (date >= now || (date.getFullYear() === now.getFullYear() && date >= new Date(now.getFullYear(), 0, 1))) {
-                        return parsed;
-                    }
-                }
-                return null;
-            }
-        },
-        // Time patterns: "at 3pm", "at 3:30pm" (without a day, assume today if early in day, tomorrow if late)
-        {
-            pattern: /\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/gi,
-            parseFn: (match) => {
-                const now = new Date();
-                const timeStr = match[1];
-                // Parse time to see if it's today or tomorrow
-                const timeMatch = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
-                if (timeMatch) {
-                    let hours = parseInt(timeMatch[1], 10);
-                    const ampm = timeMatch[3];
-                    if (ampm === 'pm' && hours !== 12) hours += 12;
-                    if (ampm === 'am' && hours === 12) hours = 0;
-                    
-                    // If it's before current time, assume tomorrow, otherwise today
-                    const targetDate = new Date(now);
-                    if (hours < now.getHours() || (hours === now.getHours() && now.getMinutes() > 0)) {
-                        targetDate.setDate(targetDate.getDate() + 1);
-                    }
-                    targetDate.setHours(hours, timeMatch[2] ? parseInt(timeMatch[2], 10) : 0, 0, 0);
-                    return targetDate.toISOString();
-                }
-                return null;
-            }
-        }
-    ];
+    // Use chrono-node to parse dates from text
+    // Parse with forwardDate option to prefer future dates when ambiguous
+    const results = chrono.parse(originalText, referenceDate, { forwardDate: true });
     
-    // Try each pattern and use the first match that successfully parses
-    for (const { pattern, parseFn } of datePatterns) {
-        // Reset regex lastIndex to ensure we start from the beginning
-        pattern.lastIndex = 0;
-        const match = pattern.exec(originalText);
-        if (match) {
-            const parsedDate = parseFn(match);
-            if (parsedDate) {
-                detectedDate = parsedDate;
-                // Remove the matched date expression from the text
-                // Reset pattern again for replace
-                pattern.lastIndex = 0;
-                cleanedText = originalText.replace(pattern, '').replace(/\s+/g, ' ').trim();
-                // Remove leading/trailing punctuation that might be left behind
-                cleanedText = cleanedText.replace(/^[,\s]+|[,\s]+$/g, '');
-                break;
-            }
-        }
+    if (results.length === 0) {
+        return { cleanedText: originalText, detectedDate: null, isDateOnly: false };
     }
     
-    return { cleanedText, detectedDate };
+    // Filter results to prefer future dates, then use the first (most confident) result
+    // Compare dates at start of day (midnight) to avoid time-of-day issues
+    const now = new Date();
+    const nowStartOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const futureResults = results.filter(result => {
+        const resultDate = result.start.date();
+        const resultStartOfDay = new Date(resultDate.getFullYear(), resultDate.getMonth(), resultDate.getDate());
+        // Prefer dates that are today or in the future
+        return resultStartOfDay >= nowStartOfDay;
+    });
+    
+    // Use future results if available, otherwise fall back to all results
+    const resultToUse = futureResults.length > 0 ? futureResults[0] : results[0];
+    let parsedDate = resultToUse.start.date();
+    
+    // Check if input explicitly contains time keywords
+    // This is more reliable than checking parsed result, as chrono-node may copy reference time
+    const hasExplicitTime = /\b(at|@|am|pm|morning|afternoon|evening|noon|midnight|\d{1,2}:\d{2})\b/i.test(originalText);
+    
+    // Also check if chrono-node detected time components in the parsed result
+    const parsedHasTime = resultToUse.start.get('hour') !== null || 
+                          resultToUse.start.get('minute') !== null ||
+                          resultToUse.start.get('second') !== null;
+    
+    // Only keep time if it was explicitly provided in the input
+    // For relative dates like "in two weeks", normalize to midnight
+    const dateOnly = !hasExplicitTime;
+    
+    // If date-only, normalize to midnight
+    if (dateOnly) {
+        parsedDate = new Date(parsedDate);
+        parsedDate.setHours(0, 0, 0, 0);
+    }
+    
+    const isoString = parsedDate.toISOString();
+    
+    // Remove the matched text from the original
+    let cleanedText = originalText;
+    if (resultToUse.index !== undefined && resultToUse.text) {
+        // Remove the matched text
+        const before = originalText.substring(0, resultToUse.index);
+        const after = originalText.substring(resultToUse.index + resultToUse.text.length);
+        cleanedText = (before + ' ' + after).replace(/\s+/g, ' ').trim();
+        // Remove leading/trailing punctuation
+        cleanedText = cleanedText.replace(/^[,\s]+|[,\s]+$/g, '');
+    }
+    
+    return { 
+        cleanedText, 
+        detectedDate: isoString, 
+        isDateOnly: dateOnly 
+    };
+}
+
+// Export isDateOnly for use in other modules
+export { isDateOnly };
+
+// Expose functions globally for backward compatibility with non-module scripts
+if (typeof window !== 'undefined') {
+    window.parseNaturalDate = parseNaturalDate;
+    window.formatDate = formatDate;
+    window.isValidDate = isValidDate;
+    window.extractDateFromText = extractDateFromText;
+    window.isDateOnly = isDateOnly;
 }

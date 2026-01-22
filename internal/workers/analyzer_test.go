@@ -15,10 +15,22 @@ import (
 
 // mockAIProvider is a mock implementation of AIProvider
 type mockAIProvider struct {
-	analyzeTaskFunc func(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
+	analyzeTaskFunc              func(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
+	analyzeTaskWithDueDateFunc   func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
 }
 
 func (m *mockAIProvider) AnalyzeTask(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+	if m.analyzeTaskFunc != nil {
+		return m.analyzeTaskFunc(ctx, text, userContext)
+	}
+	return []string{"work"}, models.TimeHorizonNext, nil
+}
+
+func (m *mockAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+	if m.analyzeTaskWithDueDateFunc != nil {
+		return m.analyzeTaskWithDueDateFunc(ctx, text, dueDate, createdAt, userContext)
+	}
+	// Default implementation
 	if m.analyzeTaskFunc != nil {
 		return m.analyzeTaskFunc(ctx, text, userContext)
 	}
@@ -32,6 +44,9 @@ func (m *mockAIProvider) Chat(ctx context.Context, messages []ai.ChatMessage, us
 func (m *mockAIProvider) SummarizeContext(ctx context.Context, conversationHistory []ai.ChatMessage) (string, error) {
 	return "", errors.New("not implemented")
 }
+
+// Ensure mock implements AIProviderWithDueDate interface
+var _ ai.AIProviderWithDueDate = (*mockAIProvider)(nil)
 
 // mockTodoRepo is a mock implementation of TodoRepositoryInterface
 type mockTodoRepo struct {
@@ -489,4 +504,253 @@ func TestTaskAnalyzer_ProcessJob(t *testing.T) {
 
 func timePtr(t time.Time) *time.Time {
 	return &t
+}
+
+func TestTaskAnalyzer_TimeContext(t *testing.T) {
+	t.Parallel()
+
+	userID := uuid.New()
+	todoID := uuid.New()
+	fixedTime := time.Date(2024, 3, 15, 14, 30, 0, 0, time.UTC)
+	timeEnteredStr := "2024-03-15T10:00:00Z" // 4.5 hours before fixedTime
+	timeEnteredParsed, _ := time.Parse(time.RFC3339, timeEnteredStr)
+
+	tests := []struct {
+		name         string
+		todo         *models.Todo
+		setupMocks   func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue)
+		validateTime func(*testing.T, time.Time) // Validates the createdAt passed to AI
+	}{
+		{
+			name: "uses TimeEntered from metadata when available",
+			todo: &models.Todo{
+				ID:          todoID,
+				UserID:      userID,
+				Text:        "Test todo",
+				Status:      models.TodoStatusPending,
+				TimeHorizon: models.TimeHorizonNext,
+				CreatedAt:   fixedTime,
+				Metadata: models.Metadata{
+					TimeEntered: &timeEnteredStr,
+				},
+			},
+			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
+				aiProvider := &mockAIProvider{
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+						return []string{"work"}, models.TimeHorizonSoon, nil
+					},
+				}
+				todoRepo := &mockTodoRepo{
+					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
+						return &models.Todo{
+							ID:          id,
+							UserID:      userID,
+							Text:        "Test todo",
+							Status:      models.TodoStatusPending,
+							TimeHorizon: models.TimeHorizonNext,
+							CreatedAt:   fixedTime,
+							Metadata: models.Metadata{
+								TimeEntered: &timeEnteredStr,
+							},
+						}, nil
+					},
+					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+						return nil
+					},
+				}
+				return aiProvider, todoRepo, &mockAIContextRepo{}, &mockUserActivityRepo{}, &mockJobQueue{}
+			},
+			validateTime: func(t *testing.T, createdAt time.Time) {
+				// Should use TimeEntered from metadata, not CreatedAt
+				if !createdAt.Equal(timeEnteredParsed) {
+					t.Errorf("Expected createdAt to be %s (from TimeEntered), got %s", timeEnteredParsed, createdAt)
+				}
+			},
+		},
+		{
+			name: "falls back to CreatedAt when TimeEntered is missing",
+			todo: &models.Todo{
+				ID:          todoID,
+				UserID:      userID,
+				Text:        "Test todo",
+				Status:      models.TodoStatusPending,
+				TimeHorizon: models.TimeHorizonNext,
+				CreatedAt:   fixedTime,
+				Metadata:    models.Metadata{}, // No TimeEntered
+			},
+			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
+				aiProvider := &mockAIProvider{
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+						return []string{"work"}, models.TimeHorizonSoon, nil
+					},
+				}
+				todoRepo := &mockTodoRepo{
+					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
+						return &models.Todo{
+							ID:          id,
+							UserID:      userID,
+							Text:        "Test todo",
+							Status:      models.TodoStatusPending,
+							TimeHorizon: models.TimeHorizonNext,
+							CreatedAt:   fixedTime,
+							Metadata:    models.Metadata{},
+						}, nil
+					},
+					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+						return nil
+					},
+				}
+				return aiProvider, todoRepo, &mockAIContextRepo{}, &mockUserActivityRepo{}, &mockJobQueue{}
+			},
+			validateTime: func(t *testing.T, createdAt time.Time) {
+				// Should fall back to CreatedAt
+				if !createdAt.Equal(fixedTime) {
+					t.Errorf("Expected createdAt to be %s (from CreatedAt), got %s", fixedTime, createdAt)
+				}
+			},
+		},
+		{
+			name: "falls back to CreatedAt when TimeEntered is invalid",
+			todo: &models.Todo{
+				ID:          todoID,
+				UserID:      userID,
+				Text:        "Test todo",
+				Status:      models.TodoStatusPending,
+				TimeHorizon: models.TimeHorizonNext,
+				CreatedAt:   fixedTime,
+				Metadata: models.Metadata{
+					TimeEntered: stringPtr("invalid-date"), // Invalid format
+				},
+			},
+			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
+				aiProvider := &mockAIProvider{
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+						return []string{"work"}, models.TimeHorizonSoon, nil
+					},
+				}
+				todoRepo := &mockTodoRepo{
+					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
+						return &models.Todo{
+							ID:          id,
+							UserID:      userID,
+							Text:        "Test todo",
+							Status:      models.TodoStatusPending,
+							TimeHorizon: models.TimeHorizonNext,
+							CreatedAt:   fixedTime,
+							Metadata: models.Metadata{
+								TimeEntered: stringPtr("invalid-date"),
+							},
+						}, nil
+					},
+					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+						return nil
+					},
+				}
+				return aiProvider, todoRepo, &mockAIContextRepo{}, &mockUserActivityRepo{}, &mockJobQueue{}
+			},
+			validateTime: func(t *testing.T, createdAt time.Time) {
+				// Should fall back to CreatedAt when parsing fails
+				if !createdAt.Equal(fixedTime) {
+					t.Errorf("Expected createdAt to be %s (fallback to CreatedAt), got %s", fixedTime, createdAt)
+				}
+			},
+		},
+		{
+			name: "passes creation time even without due date",
+			todo: &models.Todo{
+				ID:          todoID,
+				UserID:      userID,
+				Text:        "Test todo without due date",
+				Status:      models.TodoStatusPending,
+				TimeHorizon: models.TimeHorizonNext,
+				CreatedAt:   fixedTime,
+				DueDate:     nil,
+				Metadata: models.Metadata{
+					TimeEntered: &timeEnteredStr,
+				},
+			},
+			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
+				aiProvider := &mockAIProvider{
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+						return []string{"work"}, models.TimeHorizonSoon, nil
+					},
+				}
+				todoRepo := &mockTodoRepo{
+					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
+						return &models.Todo{
+							ID:          id,
+							UserID:      userID,
+							Text:        "Test todo without due date",
+							Status:      models.TodoStatusPending,
+							TimeHorizon: models.TimeHorizonNext,
+							CreatedAt:   fixedTime,
+							DueDate:     nil,
+							Metadata: models.Metadata{
+								TimeEntered: &timeEnteredStr,
+							},
+						}, nil
+					},
+					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+						return nil
+					},
+				}
+				return aiProvider, todoRepo, &mockAIContextRepo{}, &mockUserActivityRepo{}, &mockJobQueue{}
+			},
+			validateTime: func(t *testing.T, createdAt time.Time) {
+				// Should still pass creation time even without due date
+				if !createdAt.Equal(timeEnteredParsed) {
+					t.Errorf("Expected createdAt to be %s, got %s", timeEnteredParsed, createdAt)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var capturedCreatedAt time.Time
+			
+			// Wrap setupMocks to capture createdAt
+			aiProvider, todoRepo, contextRepo, activityRepo, jobQueue := tt.setupMocks()
+			
+			// Wrap the analyzeTaskWithDueDateFunc to capture createdAt
+			originalFunc := aiProvider.analyzeTaskWithDueDateFunc
+			aiProvider.analyzeTaskWithDueDateFunc = func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+				capturedCreatedAt = createdAt
+				if originalFunc != nil {
+					return originalFunc(ctx, text, dueDate, createdAt, userContext)
+				}
+				return []string{"work"}, models.TimeHorizonSoon, nil
+			}
+
+			analyzer := NewTaskAnalyzer(
+				aiProvider,
+				todoRepo,
+				contextRepo,
+				activityRepo,
+				jobQueue,
+			)
+
+			job := &queue.Job{
+				ID:     uuid.New(),
+				Type:   queue.JobTypeTaskAnalysis,
+				UserID: userID,
+				TodoID: &todoID,
+			}
+
+			err := analyzer.ProcessTaskAnalysisJob(context.Background(), job)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if tt.validateTime != nil {
+				tt.validateTime(t, capturedCreatedAt)
+			}
+		})
+	}
+}
+
+func stringPtr(s string) *string {
+	return &s
 }
