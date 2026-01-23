@@ -1,5 +1,9 @@
 // OIDC Authentication handling
 
+import { getOIDCLoginConfig } from './api.js';
+import { storeToken, getToken, isTokenExpired, removeToken } from './jwt.js';
+import logger from './logger.js';
+
 /**
  * Initiate OIDC login flow
  */
@@ -17,20 +21,20 @@ async function initiateLogin() {
             client_id: config.data.client_id,
             redirect_uri: config.data.redirect_uri,
             scope: config.data.scope,
-            state: state,
+            state: state
         });
         
         const authUrl = `${config.data.authorization_endpoint}?${params.toString()}`;
         
         // Debug logging
-        console.log('OIDC Config:', config.data);
-        console.log('Authorization URL:', authUrl);
-        console.log('Parameters:', Object.fromEntries(params));
+        logger.log('OIDC Config:', config.data);
+        logger.log('Authorization URL:', authUrl);
+        logger.log('Parameters:', Object.fromEntries(params));
         
         // Redirect to OIDC provider
         window.location.href = authUrl;
     } catch (error) {
-        console.error('Login error:', error);
+        logger.error('Login error:', error);
         const errorMessage = error.message || 'Failed to initiate login. Please try again.';
         showError(errorMessage);
     }
@@ -79,7 +83,7 @@ async function handleCallback() {
             showError('Failed to obtain authentication token');
         }
     } catch (error) {
-        console.error('Token exchange error:', error);
+        logger.error('Token exchange error:', error);
         showError('Failed to complete authentication. Please try again.');
     }
 }
@@ -92,25 +96,25 @@ async function exchangeCodeForToken(code, oidcConfig) {
     // Use token endpoint from config if available, otherwise derive from authorization endpoint
     const tokenEndpoint = oidcConfig.token_endpoint || oidcConfig.authorization_endpoint.replace('/oauth2/authorize', '/oauth2/token');
     
-    console.log('Token exchange - endpoint:', tokenEndpoint);
-    console.log('Token exchange - params:', {
+    logger.log('Token exchange - endpoint:', tokenEndpoint);
+    logger.log('Token exchange - params:', {
         grant_type: 'authorization_code',
         code: code.substring(0, 20) + '...', // Log partial code for debugging
         client_id: oidcConfig.client_id,
-        redirect_uri: oidcConfig.redirect_uri,
+        redirect_uri: oidcConfig.redirect_uri
     });
     
     const response = await fetch(tokenEndpoint, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Type': 'application/x-www-form-urlencoded'
         },
         body: new URLSearchParams({
             grant_type: 'authorization_code',
             code: code,
             client_id: oidcConfig.client_id,
-            redirect_uri: oidcConfig.redirect_uri,
-        }),
+            redirect_uri: oidcConfig.redirect_uri
+        })
     });
     
     if (!response.ok) {
@@ -129,7 +133,7 @@ async function exchangeCodeForToken(code, oidcConfig) {
                 errorMessage += `: ${errorText}`;
             }
         }
-        console.error('Token exchange error:', errorMessage, errorText);
+        logger.error('Token exchange error:', errorMessage, errorText);
         throw new Error(errorMessage);
     }
     

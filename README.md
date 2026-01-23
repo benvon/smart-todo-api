@@ -257,8 +257,23 @@ npm run build
 # Build in watch mode for development (auto-rebuilds on changes)
 npm run dev
 
-# Run tests (when implemented)
+# Run tests
 npm test
+
+# Run tests with coverage
+npm run test:coverage
+
+# Lint code
+npm run lint
+
+# Fix linting issues automatically
+npm run lint:fix
+
+# Run security audit
+npm run security:audit
+
+# Check for security issues and outdated packages
+npm run security:check
 ```
 
 The frontend build system:
@@ -268,6 +283,12 @@ The frontend build system:
 - Generates source maps for debugging
 - Uses chrono-node for natural language date parsing
 - Uses dayjs for date formatting and manipulation
+
+**Frontend Quality Tools:**
+- **ESLint** - Code linting and style enforcement
+- **c8** - Test coverage reporting
+- **npm audit** - Security vulnerability scanning
+- All tools are integrated into the Makefile and CI pipeline
 
 #### Database Migrations
 

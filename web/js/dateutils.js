@@ -3,12 +3,11 @@
 // esbuild will handle the bundling correctly
 import * as chronoNs from 'chrono-node';
 import dayjs from 'dayjs';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import customParseFormat from 'dayjs/plugin/customParseFormat';
+import relativeTime from 'dayjs/plugin/relativeTime.js';
+import customParseFormat from 'dayjs/plugin/customParseFormat.js';
 
-// Access chrono-node: try default export first, then use namespace
-// When bundled by esbuild, this should resolve correctly
-const chrono = (chronoNs && chronoNs.default) ? chronoNs.default : chronoNs;
+// Use chrono-node namespace directly (no default export in ESM)
+const chrono = chronoNs;
 
 // Extend dayjs with plugins
 dayjs.extend(relativeTime);
@@ -26,7 +25,9 @@ if (typeof window !== 'undefined') {
  * @returns {boolean} - True if the date is at midnight (date-only)
  */
 function isDateOnly(isoString) {
-    if (!isoString) return false;
+    if (!isoString) {
+        return false;
+    }
     const date = new Date(isoString);
     return date.getHours() === 0 && date.getMinutes() === 0 && date.getSeconds() === 0 && date.getMilliseconds() === 0;
 }
@@ -60,19 +61,12 @@ export function parseNaturalDate(dateString) {
         let parsedDate = firstResult.start.date();
         
         // Check if input explicitly contains time keywords
-        // If not, normalize to midnight (date-only) - even if chrono-node set a time from reference date
+        // chrono-node copies the reference time for relative dates, so we only trust explicit times
         const hasExplicitTime = /\b(at|@|am|pm|morning|afternoon|evening|noon|midnight|\d{1,2}:\d{2})\b/i.test(input);
         
-        // Also check if chrono-node detected time components in the parsed result
-        // chrono-node might set time from reference date, so we need to check both
-        const parsedHasTime = firstResult.start.get('hour') !== null || 
-                               firstResult.start.get('minute') !== null ||
-                               firstResult.start.get('second') !== null;
-        
-        // Only keep time if it was explicitly provided in the input OR detected by chrono-node
-        // For relative dates like "in two weeks", normalize to midnight
-        // Use both checks: explicit time keywords OR chrono-node detected time components
-        if (!hasExplicitTime && !parsedHasTime) {
+        // For relative dates without explicit time, chrono-node copies the reference time
+        // We always normalize to midnight unless there's an explicit time in the input
+        if (!hasExplicitTime) {
             parsedDate = new Date(parsedDate);
             parsedDate.setHours(0, 0, 0, 0);
         }
@@ -95,13 +89,20 @@ export function parseNaturalDate(dateString) {
  * @returns {string} - Formatted date string
  */
 export function formatDate(isoString) {
-    if (!isoString) return '';
+    if (!isoString) {
+        return '';
+    }
     
     const date = dayjs(isoString);
-    if (!date.isValid()) return '';
+    if (!date.isValid()) {
+        return '';
+    }
     
     const now = dayjs();
-    const diffDays = date.diff(now, 'day');
+    // Use calendar day difference, not time difference, for accurate "Today"/"Tomorrow" detection
+    const dateStart = date.startOf('day');
+    const nowStart = now.startOf('day');
+    const diffDays = dateStart.diff(nowStart, 'day');
     
     // Check if this is a date-only (no specific time)
     const dateOnly = isDateOnly(isoString);
@@ -184,18 +185,12 @@ export function extractDateFromText(text) {
     let parsedDate = resultToUse.start.date();
     
     // Check if input explicitly contains time keywords
-    // This is more reliable than checking parsed result, as chrono-node may copy reference time
+    // chrono-node copies the reference time for relative dates, so we only trust explicit times
     const hasExplicitTime = /\b(at|@|am|pm|morning|afternoon|evening|noon|midnight|\d{1,2}:\d{2})\b/i.test(originalText);
     
-    // Also check if chrono-node detected time components in the parsed result
-    const parsedHasTime = resultToUse.start.get('hour') !== null || 
-                          resultToUse.start.get('minute') !== null ||
-                          resultToUse.start.get('second') !== null;
-    
-    // Only keep time if it was explicitly provided in the input OR detected by chrono-node
-    // For relative dates like "in two weeks", normalize to midnight
-    // Use both checks: explicit time keywords OR chrono-node detected time components
-    const dateOnly = !hasExplicitTime && !parsedHasTime;
+    // For relative dates without explicit time, chrono-node copies the reference time
+    // We always normalize to midnight unless there's an explicit time in the input
+    const dateOnly = !hasExplicitTime;
     
     // If date-only, normalize to midnight
     if (dateOnly) {

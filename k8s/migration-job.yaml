@@ -24,7 +24,7 @@ spec:
       containers:
       - name: migrate
         # Replace with your actual image name and tag
-        image: smart-todo:latest
+        image: ghcr.io/benvon/smart-todo-api-server:latest
         imagePullPolicy: IfNotPresent
         command: ["/app/run_migrations.sh"]
         env:

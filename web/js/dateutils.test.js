@@ -61,9 +61,9 @@ test('formatDate - today', () => {
 test('formatDate - tomorrow', () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
+    tomorrow.setHours(0, 0, 0, 0);
     const formatted = formatDate(tomorrow.toISOString());
-    assert(formatted.includes('Tomorrow'), 'Should include "Tomorrow"');
+    assert.strictEqual(formatted, 'Tomorrow', 'Should return "Tomorrow" for date-only tomorrow');
 });
 
 test('formatDate - invalid input', () => {

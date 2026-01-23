@@ -1,5 +1,11 @@
 // Main application logic
 
+import { handleCallback, initiateLogin, isAuthenticated, logout } from './auth.js';
+import { checkAPIHealth, getTodos, createTodo, updateTodo, deleteTodo, completeTodo, analyzeTodo } from './api.js';
+import { parseNaturalDate, extractDateFromText, formatDate } from './dateutils.js';
+import { initChat } from './chat.js';
+import logger from './logger.js';
+
 let todos = [];
 
 // Initialize app
@@ -127,7 +133,7 @@ async function loadTodos() {
         }
         renderTodos();
     } catch (error) {
-        console.error('Failed to load todos:', error);
+        logger.error('Failed to load todos:', error);
         // Don't show error messages for auth errors (we're redirecting)
         if (error.isAuthError) {
             return;
@@ -198,7 +204,7 @@ async function handleAddTodo() {
         }
         renderTodos();
     } catch (error) {
-        console.error('Failed to create todo:', error);
+        logger.error('Failed to create todo:', error);
         // Don't show error messages for auth errors (we're redirecting)
         if (error.isAuthError) {
             return;
@@ -231,7 +237,7 @@ async function handleCompleteTodo(id) {
         
         renderTodos();
     } catch (error) {
-        console.error('Failed to complete todo:', error);
+        logger.error('Failed to complete todo:', error);
         // Don't show error messages for auth errors (we're redirecting)
         if (error.isAuthError) {
             return;
@@ -259,7 +265,7 @@ async function handleDeleteTodo(id) {
         todos = todos.filter(t => t.id !== id);
         renderTodos();
     } catch (error) {
-        console.error('Failed to delete todo:', error);
+        logger.error('Failed to delete todo:', error);
         // Don't show error messages for auth errors (we're redirecting)
         if (error.isAuthError) {
             return;
@@ -319,7 +325,7 @@ async function handleReprocessTodo(id, statusBadge) {
             loadTodos();
         }, 1000);
     } catch (error) {
-        console.error('Failed to reprocess todo:', error);
+        logger.error('Failed to reprocess todo:', error);
         // Restore original state on error
         statusBadge.textContent = originalText;
         statusBadge.className = originalClass;
@@ -353,7 +359,9 @@ function renderTodos() {
     
     // Clear existing todos
     [nextList, soonList, laterList].forEach(list => {
-        if (list) list.innerHTML = '';
+        if (list) {
+            list.innerHTML = '';
+        }
     });
     
     // Filter and render
@@ -373,7 +381,9 @@ function renderTodos() {
  * Render a list of todos
  */
 function renderTodoList(container, todoList, timeHorizon) {
-    if (!container) return;
+    if (!container) {
+        return;
+    }
     
     // Set data attribute for drop zone identification
     container.setAttribute('data-time-horizon', timeHorizon);
@@ -644,7 +654,7 @@ async function handleDrop(e) {
         // Re-render to show the change
         renderTodos();
     } catch (error) {
-        console.error('Failed to update todo time horizon:', error);
+        logger.error('Failed to update todo time horizon:', error);
         // Don't show error messages for auth errors (we're redirecting)
         if (!error.isAuthError) {
             showError(error.message || 'Failed to move todo. Please try again.');
@@ -702,7 +712,7 @@ async function handleEditDueDate(id, element, currentDueDate) {
             // Re-render to show updated date
             renderTodos();
         } catch (error) {
-            console.error('Failed to update due date:', error);
+            logger.error('Failed to update due date:', error);
             // Restore original display
             const newElement = document.createElement('div');
             newElement.className = 'todo-due-date due-date-editable';
@@ -737,15 +747,6 @@ async function handleEditDueDate(id, element, currentDueDate) {
             input.replaceWith(newElement);
         }
     });
-}
-
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 /**

@@ -1,5 +1,7 @@
 // API client
 
+import { removeToken, getToken, isTokenExpired } from './jwt.js';
+
 /**
  * Handle authentication error (no token or expired token)
  * Redirects to login page if not already there
@@ -36,12 +38,12 @@ async function apiRequest(endpoint, options = {}) {
     const headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
-        ...options.headers,
+        ...options.headers
     };
 
     const response = await fetch(url, {
         ...options,
-        headers,
+        headers
     });
 
     if (!response.ok) {
@@ -96,7 +98,7 @@ async function apiRequest(endpoint, options = {}) {
 
     try {
         return JSON.parse(text);
-    } catch (e) {
+    } catch {
         // If JSON parsing fails but response was OK, return success
         return { success: true, data: null };
     }
@@ -185,7 +187,7 @@ async function createTodo(text, dueDate = null) {
     }
     return apiRequest('/api/v1/todos', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payload)
     });
 }
 
@@ -199,7 +201,7 @@ async function updateTodo(id, updates) {
     }
     return apiRequest(`/api/v1/todos/${id}`, {
         method: 'PATCH',
-        body: JSON.stringify(updates),
+        body: JSON.stringify(updates)
     });
 }
 
@@ -208,7 +210,7 @@ async function updateTodo(id, updates) {
  */
 async function deleteTodo(id) {
     return apiRequest(`/api/v1/todos/${id}`, {
-        method: 'DELETE',
+        method: 'DELETE'
     });
 }
 
@@ -217,7 +219,7 @@ async function deleteTodo(id) {
  */
 async function completeTodo(id) {
     return apiRequest(`/api/v1/todos/${id}/complete`, {
-        method: 'POST',
+        method: 'POST'
     });
 }
 
@@ -226,7 +228,7 @@ async function completeTodo(id) {
  */
 async function analyzeTodo(id) {
     return apiRequest(`/api/v1/todos/${id}/analyze`, {
-        method: 'POST',
+        method: 'POST'
     });
 }
 
@@ -236,7 +238,7 @@ async function analyzeTodo(id) {
 async function sendChatMessage(message) {
     return apiRequest('/api/v1/ai/chat/message', {
         method: 'POST',
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message })
     });
 }
 
@@ -252,7 +254,7 @@ async function checkAPIHealth() {
         const url = `${window.API_BASE_URL}/healthz`;
         const response = await fetch(url, {
             method: 'GET',
-            signal: AbortSignal.timeout(5000), // 5 second timeout
+            signal: AbortSignal.timeout(5000) // 5 second timeout
         });
         if (response.ok) {
             const data = await response.json();
@@ -277,7 +279,7 @@ export {
     completeTodo,
     analyzeTodo,
     sendChatMessage,
-    checkAPIHealth,
+    checkAPIHealth
 };
 
 // Expose functions globally for backward compatibility

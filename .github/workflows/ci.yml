@@ -155,3 +155,124 @@ jobs:
       run: |
         go mod tidy
         git diff --exit-code go.mod go.sum || (echo "Please run 'go mod tidy' and commit the changes" && exit 1)
+
+  web-test:
+    name: Web Test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: '.tool-versions'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./web
+      run: npm ci
+
+    - name: Run tests with coverage
+      working-directory: ./web
+      run: npm run test:coverage
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        files: ./web/coverage/coverage-final.json
+        flags: web-tests
+        name: codecov-web
+
+  web-lint:
+    name: Web Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: '.tool-versions'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./web
+      run: npm ci
+
+    - name: Run ESLint
+      working-directory: ./web
+      run: npm run lint
+
+  web-security:
+    name: Web Security
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: '.tool-versions'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./web
+      run: npm ci
+
+    - name: Run npm audit with suppressions
+      working-directory: ./web
+      run: npx check-audit --audit-level=moderate
+
+    - name: Check for outdated packages
+      working-directory: ./web
+      run: npm outdated || true
+
+  web-build:
+    name: Web Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: '.tool-versions'
+        cache: 'npm'
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      working-directory: ./web
+      run: npm ci
+
+    - name: Build frontend
+      working-directory: ./web
+      run: npm run build
+
+  web-mod-check:
+    name: Web Package Lock Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version-file: '.tool-versions'
+
+    - name: Check if package-lock.json is in sync
+      working-directory: ./web
+      run: |
+        npm ci --dry-run || (echo "Please run 'npm install' and commit package-lock.json changes" && exit 1)

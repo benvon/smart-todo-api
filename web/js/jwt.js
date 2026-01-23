@@ -1,5 +1,7 @@
 // JWT token utilities
 
+import logger from './logger.js';
+
 const JWT_STORAGE_KEY = 'smart_todo_jwt_token';
 
 /**
@@ -37,7 +39,7 @@ function parseToken(token) {
         const payload = JSON.parse(atob(parts[1]));
         return payload;
     } catch (e) {
-        console.error('Failed to parse token:', e);
+        logger.error('Failed to parse token:', e);
         return null;
     }
 }
