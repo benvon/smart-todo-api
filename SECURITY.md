@@ -62,8 +62,23 @@ This project uses several automated security tools:
 - **CodeQL**: Static analysis for security vulnerabilities
 - **Gosec**: Go-specific security analyzer
 - **govulncheck**: Go vulnerability checker
+- **npm audit**: JavaScript dependency vulnerability scanning (with focused suppressions via npm-audit-resolver)
 
 These tools run automatically on pull requests and can be found in our GitHub Actions workflows.
+
+### npm Audit Suppressions
+
+The web frontend uses `npm-audit-resolver` to manage security vulnerability suppressions in a controlled, auditable way. Suppressions are tracked in `web/audit-resolve.json` with clear rationale for each decision.
+
+**Current Suppressions:**
+
+- **undici (GHSA-g9mf-h72j-4rw9)**: Suppressed for transitive dependencies via `@actions/http-client` and `@actions/core`. Rationale:
+  - The application uses native browser `fetch()` API, not Node.js fetch (which uses undici)
+  - The vulnerable code path is not executed at runtime
+  - These are dev dependencies used only by semantic-release tooling during build/release
+  - `@actions/http-client` is not imported in source code (verified by `scripts/verify-unused-deps.js`)
+
+All suppressions are reviewed regularly and can be revoked when fixes become available or circumstances change.
 
 ## Security-Related Dependencies
 

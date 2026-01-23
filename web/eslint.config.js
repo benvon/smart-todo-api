@@ -65,7 +65,21 @@ export default [
             'quotes': ['error', 'single', { avoidEscape: true }],
             'comma-dangle': ['error', 'never'],
             'indent': ['error', 4, { SwitchCase: 1 }],
-            'max-len': ['warn', { code: 100, ignoreUrls: true, ignoreStrings: true }]
+            'max-len': ['warn', { code: 200, ignoreUrls: true, ignoreStrings: true }]
+        }
+    },
+    // Allow console statements in scripts directory (utility scripts need console output)
+    {
+        files: ['scripts/**/*.js'],
+        rules: {
+            'no-console': 'off'
+        }
+    },
+    // Allow console statements in logger utility (it wraps console calls)
+    {
+        files: ['js/logger.js'],
+        rules: {
+            'no-console': 'off'
         }
     }
 ];

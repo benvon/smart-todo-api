@@ -1,6 +1,7 @@
 import { build } from 'esbuild';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import logger from './js/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -39,9 +40,9 @@ if (isWatch) {
     buildOptions.watch = {
         onRebuild(error, _result) {
             if (error) {
-                console.error('Build failed:', error);
+                logger.error('Build failed:', error);
             } else {
-                console.log('Build succeeded');
+                logger.log('Build succeeded');
             }
         }
     };
@@ -50,12 +51,12 @@ if (isWatch) {
 build(buildOptions)
     .then(() => {
         if (!isWatch) {
-            console.log('Build complete');
+            logger.log('Build complete');
         } else {
-            console.log('Watching for changes...');
+            logger.log('Watching for changes...');
         }
     })
     .catch((error) => {
-        console.error('Build error:', error);
+        logger.error('Build error:', error);
         process.exit(1);
     });

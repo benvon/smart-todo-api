@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "decisions": {
+    "1112496|@actions/core>undici": {
+      "decision": "ignore",
+      "madeAt": 1737657600000,
+      "reason": "Vulnerability in transitive dependency undici via @actions/core. Application uses native browser fetch() API, not Node.js fetch, so vulnerable code path is not executed at runtime. This is a dev dependency used by semantic-release tooling only."
+    },
+    "1112496|@actions/http-client>undici": {
+      "decision": "ignore",
+      "madeAt": 1737657600000,
+      "reason": "Vulnerability in transitive dependency undici via @actions/http-client. Application uses native browser fetch() API, not Node.js fetch, so vulnerable code path is not executed at runtime. @actions/http-client is not imported in source code (verified by scripts/verify-unused-deps.js)."
+    }
+  }
+}

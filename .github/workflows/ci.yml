@@ -228,9 +228,9 @@ jobs:
       working-directory: ./web
       run: npm ci
 
-    - name: Run npm audit
+    - name: Run npm audit with suppressions
       working-directory: ./web
-      run: npm audit --audit-level=moderate
+      run: npx check-audit --audit-level=moderate
 
     - name: Check for outdated packages
       working-directory: ./web

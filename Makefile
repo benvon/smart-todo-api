@@ -406,7 +406,7 @@ web-lint:
 	cd web && npm run lint
 	$(call print_success,ESLint completed!)
 
-## web-security: Run npm audit and security checks
+## web-security: Run npm audit with suppressions and security checks
 web-security:
 	$(call print_info,Running npm security checks...)
 	cd web && npm run security:check

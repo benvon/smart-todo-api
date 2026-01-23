@@ -1,6 +1,7 @@
 // Chat functionality
 
 import { sendChatMessage } from './api.js';
+import logger from './logger.js';
 
 /**
  * Initialize chat interface
@@ -63,7 +64,7 @@ async function handleSendMessage() {
             throw new Error('Invalid response from server');
         }
     } catch (error) {
-        console.error('Failed to send chat message:', error);
+        logger.error('Failed to send chat message:', error);
         // Don't show error messages for auth errors (we're redirecting)
         if (!error.isAuthError) {
             addChatMessage('assistant', `Sorry, I encountered an error: ${error.message}. Please try again.`);
