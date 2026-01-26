@@ -54,6 +54,30 @@ jobs:
           echo "package_path=${PACKAGE_FILE}" >> $GITHUB_OUTPUT
           echo "Package created: ${PACKAGE_FILE}"
 
+      - name: Assert tarball has no config.json
+        run: |
+          if tar -tzf "${{ steps.package.outputs.package_path }}" | grep -q 'config\.json'; then
+            echo "config.json must not be in release tarball"
+            exit 1
+          fi
+
+      - name: Prepare deployment directory
+        env:
+          WEB_API_BASE_URL: ${{ secrets.WEB_API_BASE_URL }}
+        run: |
+          mkdir -p deploy
+          tar -xzf "${{ steps.package.outputs.package_path }}" -C deploy --strip-components=1
+          node -e "require('fs').writeFileSync('deploy/config.json', JSON.stringify({api_base_url: process.env.WEB_API_BASE_URL}))"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/pages-action@v1.5.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          directory: deploy
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:

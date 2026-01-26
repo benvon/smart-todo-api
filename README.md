@@ -454,6 +454,8 @@ docker run \
 
 #### Frontend Deployment
 
+On version tags (`*.*.*`), the frontend is built, deployed to Cloudflare Pages (when secrets are configured), and a release tarball is published. See [docs/DEPLOYING_FRONTEND.md](docs/DEPLOYING_FRONTEND.md) for automated Cloudflare Pages deployment and required GitHub Actions secrets (`WEB_API_BASE_URL`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_PAGES_PROJECT_NAME`).
+
 The frontend is a static Progressive Web App that can be deployed to:
 
 - Cloudflare Pages
