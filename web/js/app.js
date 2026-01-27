@@ -903,11 +903,11 @@ function deepClone(obj) {
  * Handle editing a todo
  */
 async function handleEditTodo(id, todoEl, todo) {
-    // Store original content using deep clones to prevent mutations
+    // Create working copies using deep clones to prevent mutations to the original todo object
     // This ensures that if the user cancels, the original todo data remains unchanged
     const originalText = todo.text;
-    const originalTags = todo.metadata?.category_tags ? deepClone(todo.metadata.category_tags) : [];
-    const originalTagSources = todo.metadata?.tag_sources ? deepClone(todo.metadata.tag_sources) : {};
+    const workingTags = todo.metadata?.category_tags ? deepClone(todo.metadata.category_tags) : [];
+    const workingTagSources = todo.metadata?.tag_sources ? deepClone(todo.metadata.tag_sources) : {};
     const originalDueDate = todo.due_date;
 
     // Create edit mode UI
@@ -940,14 +940,14 @@ async function handleEditTodo(id, todoEl, todo) {
     tagsDiv.style.marginBottom = '10px';
 
     // Render existing tags
-    originalTags.forEach(tag => {
-        const tagChip = createTagChip(tag, originalTagSources[tag] === 'ai', () => {
+    workingTags.forEach(tag => {
+        const tagChip = createTagChip(tag, workingTagSources[tag] === 'ai', () => {
             // Remove tag handler
-            const index = originalTags.indexOf(tag);
+            const index = workingTags.indexOf(tag);
             if (index > -1) {
-                originalTags.splice(index, 1);
-                delete originalTagSources[tag];
-                renderTagsEditor(tagsDiv, originalTags, originalTagSources);
+                workingTags.splice(index, 1);
+                delete workingTagSources[tag];
+                renderTagsEditor(tagsDiv, workingTags, workingTagSources);
             }
         });
         tagsDiv.appendChild(tagChip);
@@ -961,11 +961,11 @@ async function handleEditTodo(id, todoEl, todo) {
     addTagInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             const tagName = addTagInput.value.trim();
-            if (tagName && !originalTags.includes(tagName)) {
-                originalTags.push(tagName);
-                originalTagSources[tagName] = 'user';
+            if (tagName && !workingTags.includes(tagName)) {
+                workingTags.push(tagName);
+                workingTagSources[tagName] = 'user';
                 addTagInput.value = '';
-                renderTagsEditor(tagsDiv, originalTags, originalTagSources);
+                renderTagsEditor(tagsDiv, workingTags, workingTagSources);
             }
         }
     });
@@ -997,7 +997,7 @@ async function handleEditTodo(id, todoEl, todo) {
     saveBtn.className = 'btn btn-small btn-primary todo-edit-button';
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', async () => {
-        await saveTodoEdit(id, textInput.value, originalTags, dueDateInput.value, todoEl);
+        await saveTodoEdit(id, textInput.value, workingTags, dueDateInput.value, todoEl);
     });
     
     const cancelBtn = document.createElement('button');
