@@ -64,17 +64,17 @@ func (a *TaskAnalyzer) getTagStatistics(ctx context.Context, userID uuid.UUID) (
 	// Check cache first
 	a.cacheMu.RLock()
 	cache, exists := a.tagStatsCache[userID]
-	a.cacheMu.RUnlock()
-
 	if exists {
 		cache.mu.RLock()
 		if time.Now().Before(cache.expires) && cache.stats != nil {
 			stats := cache.stats
 			cache.mu.RUnlock()
+			a.cacheMu.RUnlock()
 			return stats, nil
 		}
 		cache.mu.RUnlock()
 	}
+	a.cacheMu.RUnlock()
 
 	// Fetch from database
 	stats, err := a.tagStatsRepo.GetByUserID(ctx, userID)
@@ -91,6 +91,7 @@ func (a *TaskAnalyzer) getTagStatistics(ctx context.Context, userID uuid.UUID) (
 	a.tagStatsCache[userID] = &TagStatsCache{
 		stats:   stats,
 		expires: time.Now().Add(a.cacheTTL),
+		mu:      sync.RWMutex{},
 	}
 	a.cacheMu.Unlock()
 
