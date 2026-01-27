@@ -43,6 +43,7 @@ export default [
                 AbortController: 'readonly',
                 EventSource: 'readonly',
                 DOMException: 'readonly',
+                structuredClone: 'readonly',
                 // Node.js globals
                 process: 'readonly',
                 Buffer: 'readonly',

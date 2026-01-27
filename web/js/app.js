@@ -873,15 +873,25 @@ async function handleEditDueDate(id, element, currentDueDate) {
  * Deep clone utility for safely copying objects and arrays.
  * This prevents mutations to the original data structure.
  * 
- * Note: This implementation handles the current data structures used in this app:
+ * Uses the native structuredClone() when available (modern browsers),
+ * which handles complex types like Date, Map, Set, and circular references.
+ * Falls back to a custom implementation for older browsers.
+ * 
+ * Note: The custom implementation handles the current data structures used in this app:
  * - Arrays of primitive values (strings, numbers)
  * - Objects with primitive values
  * - Nested objects and arrays
  * 
  * For more complex structures (e.g., objects with Date, Map, Set, or class instances),
- * consider using a library like lodash.cloneDeep or structuredClone (if available).
+ * the native structuredClone is preferred when available.
  */
 function deepClone(obj) {
+    // Use native structuredClone if available (modern browsers)
+    if (typeof structuredClone === 'function') {
+        return structuredClone(obj);
+    }
+    
+    // Fallback implementation for older browsers
     if (obj === null || typeof obj !== 'object') {
         return obj;
     }
@@ -905,6 +915,8 @@ function deepClone(obj) {
 async function handleEditTodo(id, todoEl, todo) {
     // Create working copies using deep clones to prevent mutations to the original todo object
     // This ensures that if the user cancels, the original todo data remains unchanged
+    // Deep cloning is used even for simple structures to future-proof against more complex
+    // nested data (e.g., if tag_sources values become objects with additional metadata)
     const originalText = todo.text;
     const workingTags = todo.metadata?.category_tags ? deepClone(todo.metadata.category_tags) : [];
     const workingTagSources = todo.metadata?.tag_sources ? deepClone(todo.metadata.tag_sources) : {};
