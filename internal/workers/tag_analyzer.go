@@ -64,8 +64,8 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 		allTodos = append(allTodos, todos...)
 		
 		// Check if we've loaded all todos
-		// If this page returned fewer todos than pageSize, we're done
-		if len(todos) < pageSize {
+		// If this page returned no todos or fewer than pageSize, we're done
+		if len(todos) == 0 || len(todos) < pageSize {
 			break
 		}
 		
