@@ -870,13 +870,59 @@ async function handleEditDueDate(id, element, currentDueDate) {
 }
 
 /**
+ * Deep clone utility for safely copying objects and arrays.
+ * This prevents mutations to the original data structure.
+ * 
+ * Uses the native structuredClone() when available (modern browsers),
+ * which handles complex types like Date, Map, Set, and circular references.
+ * Falls back to a custom implementation for older browsers.
+ * 
+ * Note: The custom implementation handles the current data structures used in this app:
+ * - Arrays of primitive values (strings, numbers)
+ * - Objects with primitive values
+ * - Nested objects and arrays
+ * 
+ * For more complex structures (e.g., objects with Date, Map, Set, or class instances),
+ * the native structuredClone is preferred when available.
+ * 
+ * @param {*} obj - The value to clone (can be any type)
+ * @returns {*} A deep clone of the input value
+ */
+function deepClone(obj) {
+    // Use native structuredClone if available (modern browsers)
+    if (typeof structuredClone === 'function') {
+        return structuredClone(obj);
+    }
+    
+    // Fallback implementation for older browsers
+    if (obj === null || typeof obj !== 'object') {
+        return obj;
+    }
+    
+    if (Array.isArray(obj)) {
+        return obj.map(item => deepClone(item));
+    }
+    
+    const cloned = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            cloned[key] = deepClone(obj[key]);
+        }
+    }
+    return cloned;
+}
+
+/**
  * Handle editing a todo
  */
 async function handleEditTodo(id, todoEl, todo) {
-    // Store original content
+    // Create working copies using deep clones to prevent mutations to the original todo object
+    // This ensures that if the user cancels, the original todo data remains unchanged
+    // Deep cloning is used even for simple structures to future-proof against more complex
+    // nested data (e.g., if tag_sources values become objects with additional metadata)
     const originalText = todo.text;
-    const originalTags = todo.metadata?.category_tags ? [...todo.metadata.category_tags] : [];
-    const originalTagSources = todo.metadata?.tag_sources ? { ...todo.metadata.tag_sources } : {};
+    const workingTags = todo.metadata?.category_tags ? deepClone(todo.metadata.category_tags) : [];
+    const workingTagSources = todo.metadata?.tag_sources ? deepClone(todo.metadata.tag_sources) : {};
     const originalDueDate = todo.due_date;
 
     // Create edit mode UI
@@ -909,14 +955,14 @@ async function handleEditTodo(id, todoEl, todo) {
     tagsDiv.style.marginBottom = '10px';
 
     // Render existing tags
-    originalTags.forEach(tag => {
-        const tagChip = createTagChip(tag, originalTagSources[tag] === 'ai', () => {
+    workingTags.forEach(tag => {
+        const tagChip = createTagChip(tag, workingTagSources[tag] === 'ai', () => {
             // Remove tag handler
-            const index = originalTags.indexOf(tag);
+            const index = workingTags.indexOf(tag);
             if (index > -1) {
-                originalTags.splice(index, 1);
-                delete originalTagSources[tag];
-                renderTagsEditor(tagsDiv, originalTags, originalTagSources);
+                workingTags.splice(index, 1);
+                delete workingTagSources[tag];
+                renderTagsEditor(tagsDiv, workingTags, workingTagSources);
             }
         });
         tagsDiv.appendChild(tagChip);
@@ -930,11 +976,11 @@ async function handleEditTodo(id, todoEl, todo) {
     addTagInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             const tagName = addTagInput.value.trim();
-            if (tagName && !originalTags.includes(tagName)) {
-                originalTags.push(tagName);
-                originalTagSources[tagName] = 'user';
+            if (tagName && !workingTags.includes(tagName)) {
+                workingTags.push(tagName);
+                workingTagSources[tagName] = 'user';
                 addTagInput.value = '';
-                renderTagsEditor(tagsDiv, originalTags, originalTagSources);
+                renderTagsEditor(tagsDiv, workingTags, workingTagSources);
             }
         }
     });
@@ -966,7 +1012,7 @@ async function handleEditTodo(id, todoEl, todo) {
     saveBtn.className = 'btn btn-small btn-primary todo-edit-button';
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', async () => {
-        await saveTodoEdit(id, textInput.value, originalTags, dueDateInput.value, todoEl);
+        await saveTodoEdit(id, textInput.value, workingTags, dueDateInput.value, todoEl);
     });
     
     const cancelBtn = document.createElement('button');
