@@ -458,12 +458,16 @@ function renderTodos() {
     const soonList = document.getElementById('todos-soon');
     const laterList = document.getElementById('todos-later');
     
-    // Check if any todo is in edit mode - if so, don't re-render
+    // Collect todos currently in edit mode to preserve them during re-render
     const editModeTodos = document.querySelectorAll('.todo-item.todo-edit-mode');
-    if (editModeTodos.length > 0) {
-        // Skip re-rendering if any todo is being edited
-        return;
-    }
+    const editModeElements = new Map();
+    editModeTodos.forEach(el => {
+        const todoId = el.getAttribute('data-todo-id');
+        if (todoId) {
+            // Store with string key to match the lookup below
+            editModeElements.set(String(todoId), el);
+        }
+    });
     
     // Clear existing todos
     [nextList, soonList, laterList].forEach(list => {
@@ -477,9 +481,9 @@ function renderTodos() {
     const soonTodos = todos.filter(t => t.time_horizon === 'soon' && t.status !== 'completed');
     const laterTodos = todos.filter(t => t.time_horizon === 'later' && t.status !== 'completed');
     
-    renderTodoList(nextList, nextTodos, 'next');
-    renderTodoList(soonList, soonTodos, 'soon');
-    renderTodoList(laterList, laterTodos, 'later');
+    renderTodoList(nextList, nextTodos, 'next', editModeElements);
+    renderTodoList(soonList, soonTodos, 'soon', editModeElements);
+    renderTodoList(laterList, laterTodos, 'later', editModeElements);
     
     // Setup drag and drop for all lists
     setupDragAndDrop();
@@ -488,7 +492,7 @@ function renderTodos() {
 /**
  * Render a list of todos
  */
-function renderTodoList(container, todoList, timeHorizon) {
+function renderTodoList(container, todoList, timeHorizon, editModeElements) {
     if (!container) {
         return;
     }
@@ -497,6 +501,13 @@ function renderTodoList(container, todoList, timeHorizon) {
     container.setAttribute('data-time-horizon', timeHorizon);
     
     todoList.forEach(todo => {
+        // If this todo is in edit mode, re-use the existing element to preserve edit state
+        if (editModeElements && editModeElements.has(String(todo.id))) {
+            const existingEl = editModeElements.get(String(todo.id));
+            container.appendChild(existingEl);
+            return;
+        }
+        
         const todoEl = document.createElement('div');
         todoEl.className = 'todo-item';
         

@@ -365,9 +365,21 @@ func tagsEqual(a, b []string) bool {
 	mapB := make(map[string]int)
 
 	for _, tag := range a {
+		if _, exists := seenA[tag]; exists {
+			log.Printf("tagsEqual: duplicate tag %q detected in first tag slice", tag)
+		} else {
+			seenA[tag] = struct{}{}
+		}
 		mapA[tag]++
 	}
+
+	seenB := make(map[string]struct{})
 	for _, tag := range b {
+		if _, exists := seenB[tag]; exists {
+			log.Printf("tagsEqual: duplicate tag %q detected in second tag slice", tag)
+		} else {
+			seenB[tag] = struct{}{}
+		}
 		mapB[tag]++
 	}
 
