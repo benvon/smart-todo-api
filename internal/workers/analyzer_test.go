@@ -60,7 +60,7 @@ var _ ai.AIProviderWithDueDate = (*mockAIProvider)(nil)
 type mockTodoRepo struct {
 	t                         *testing.T
 	getByIDFunc               func(ctx context.Context, id uuid.UUID) (*models.Todo, error)
-	updateFunc                func(ctx context.Context, todo *models.Todo) error
+	updateFunc                func(ctx context.Context, todo *models.Todo, oldTags []string) error
 	getByUserIDPaginatedFunc  func(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error)
 	
 	// Call tracking (protected by mutex for concurrent access)
@@ -90,14 +90,14 @@ func (m *mockTodoRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Todo,
 	return m.getByIDFunc(ctx, id)
 }
 
-func (m *mockTodoRepo) Update(ctx context.Context, todo *models.Todo) error {
+func (m *mockTodoRepo) Update(ctx context.Context, todo *models.Todo, oldTags []string) error {
 	m.mu.Lock()
 	m.updateCalls = append(m.updateCalls, todo)
 	m.mu.Unlock()
 	if m.updateFunc == nil {
 		m.t.Fatal("Update called but not configured in test - mock requires explicit setup")
 	}
-	return m.updateFunc(ctx, todo)
+	return m.updateFunc(ctx, todo, oldTags)
 }
 
 func (m *mockTodoRepo) GetByUserIDPaginated(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error) {
@@ -272,7 +272,7 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 							Metadata:    models.Metadata{},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -317,7 +317,7 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 							},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -446,7 +446,7 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 							Metadata:    models.Metadata{},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -546,7 +546,7 @@ func TestTaskAnalyzer_ProcessJob(t *testing.T) {
 							Status: models.TodoStatusPending,
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -703,7 +703,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 							},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -745,7 +745,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 							Metadata:    models.Metadata{},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -791,7 +791,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 							},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}
@@ -839,7 +839,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 							},
 						}, nil
 					},
-					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+					updateFunc: func(ctx context.Context, todo *models.Todo, oldTags []string) error {
 						return nil
 					},
 				}

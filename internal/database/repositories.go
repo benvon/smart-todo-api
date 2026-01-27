@@ -11,7 +11,7 @@ import (
 // This interface enables better testability by allowing mock implementations
 type TodoRepositoryInterface interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Todo, error)
-	Update(ctx context.Context, todo *models.Todo) error
+	Update(ctx context.Context, todo *models.Todo, oldTags []string) error
 	GetByUserIDPaginated(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error)
 	SetTagStatsRepo(repo TagStatisticsRepositoryInterface)      // Optional: for tag change detection
 	SetTagChangeHandler(handler TagChangeHandler)                // Optional: callback when tags change

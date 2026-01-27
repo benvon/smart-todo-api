@@ -324,6 +324,9 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save old tags for tag change detection
+	oldTags := todo.Metadata.CategoryTags
+
 	var req UpdateTodoRequest
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&req); err != nil {
@@ -402,7 +405,7 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.todoRepo.Update(ctx, todo); err != nil {
+	if err := h.todoRepo.Update(ctx, todo, oldTags); err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to update todo")
 		return
 	}
@@ -476,12 +479,15 @@ func (h *TodoHandler) CompleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save old tags for tag change detection
+	oldTags := todo.Metadata.CategoryTags
+
 	// Mark as completed
 	now := time.Now()
 	todo.Status = models.TodoStatusCompleted
 	todo.CompletedAt = &now
 
-	if err := h.todoRepo.Update(ctx, todo); err != nil {
+	if err := h.todoRepo.Update(ctx, todo, oldTags); err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to complete todo")
 		return
 	}
