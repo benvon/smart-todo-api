@@ -13,6 +13,7 @@ import (
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 )
 
 
@@ -368,3 +369,68 @@ func (m *mockTagStatisticsRepoForHandlers) MarkTainted(ctx context.Context, user
 }
 
 var _ database.TagStatisticsRepositoryInterface = (*mockTagStatisticsRepoForHandlers)(nil)
+
+// TestTodoHandler_GetTagStats_RouteNotRegisteredWhenNil tests that the /tags/stats route
+// is not registered when tagStatsRepo is nil, preventing nil pointer panics
+func TestTodoHandler_GetTagStats_RouteNotRegisteredWhenNil(t *testing.T) {
+	t.Parallel()
+
+	// Create handler without tagStatsRepo (like NewTodoHandler or NewTodoHandlerWithQueue)
+	mockTodoRepo := &database.TodoRepository{} // Minimal mock
+	handler := NewTodoHandler(mockTodoRepo)
+
+	// Register routes
+	router := mux.NewRouter()
+	todosRouter := router.PathPrefix("/api/v1/todos").Subrouter()
+	handler.RegisterRoutes(todosRouter)
+
+	// Create a request to the tag stats endpoint
+	req := httptest.NewRequest("GET", "/api/v1/todos/tags/stats", nil)
+	user := &models.User{ID: uuid.New()}
+	req = setUserInRequestContext(req, user)
+	w := httptest.NewRecorder()
+
+	// Route should not be registered, so should return 404
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404 (route not found) when tagStatsRepo is nil, got %d", w.Code)
+	}
+}
+
+// TestTodoHandler_GetTagStats_DefensiveNilCheck tests that GetTagStats handles nil tagStatsRepo gracefully
+// This is a defensive check in case the route somehow gets called when tagStatsRepo is nil
+func TestTodoHandler_GetTagStats_DefensiveNilCheck(t *testing.T) {
+	t.Parallel()
+
+	// Create handler without tagStatsRepo
+	mockTodoRepo := &database.TodoRepository{} // Minimal mock
+	handler := NewTodoHandler(mockTodoRepo)
+
+	// Directly call GetTagStats (bypassing route registration)
+	req := httptest.NewRequest("GET", "/api/v1/todos/tags/stats", nil)
+	user := &models.User{ID: uuid.New()}
+	req = setUserInRequestContext(req, user)
+	w := httptest.NewRecorder()
+
+	handler.GetTagStats(w, req)
+
+	// Should return ServiceUnavailable, not panic
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status 503 (Service Unavailable) when tagStatsRepo is nil, got %d", w.Code)
+	}
+
+	var errorResp struct {
+		Success   bool   `json:"success"`
+		Error     string `json:"error"`
+		Message   string `json:"message"`
+		Timestamp string `json:"timestamp"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &errorResp); err != nil {
+		t.Fatalf("Failed to unmarshal error response: %v", err)
+	}
+
+	if errorResp.Message != "Tag statistics are not available" {
+		t.Errorf("Expected error message 'Tag statistics are not available', got '%s'", errorResp.Message)
+	}
+}

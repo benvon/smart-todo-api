@@ -52,7 +52,10 @@ func NewTodoHandlerWithQueueAndTagStats(todoRepo *database.TodoRepository, tagSt
 func (h *TodoHandler) RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("", h.ListTodos).Methods("GET")
 	r.HandleFunc("", h.CreateTodo).Methods("POST")
-	r.HandleFunc("/tags/stats", h.GetTagStats).Methods("GET")
+	// Only register tag stats route if tagStatsRepo is available
+	if h.tagStatsRepo != nil {
+		r.HandleFunc("/tags/stats", h.GetTagStats).Methods("GET")
+	}
 	r.HandleFunc("/{id}", h.GetTodo).Methods("GET")
 	r.HandleFunc("/{id}", h.UpdateTodo).Methods("PATCH")
 	r.HandleFunc("/{id}", h.DeleteTodo).Methods("DELETE")
@@ -541,6 +544,13 @@ func (h *TodoHandler) GetTagStats(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
+		return
+	}
+
+	// Defensive check: tagStatsRepo should not be nil if route is registered
+	// but check anyway to prevent panic
+	if h.tagStatsRepo == nil {
+		respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "Tag statistics are not available")
 		return
 	}
 
