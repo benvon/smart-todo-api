@@ -3,8 +3,8 @@ package oidc
 import (
 	"context"
 
-	"golang.org/x/oauth2"
 	"github.com/benvon/smart-todo/internal/models"
+	"golang.org/x/oauth2"
 )
 
 // Client wraps OAuth2 client functionality
@@ -18,7 +18,7 @@ func NewClient(oidcConfig *models.OIDCConfig) *Client {
 	if oidcConfig.ClientSecret != nil {
 		clientSecret = *oidcConfig.ClientSecret
 	}
-	
+
 	config := &oauth2.Config{
 		ClientID:     oidcConfig.ClientID,
 		ClientSecret: clientSecret,

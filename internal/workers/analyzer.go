@@ -14,12 +14,12 @@ import (
 
 // TaskAnalyzer processes task analysis jobs
 type TaskAnalyzer struct {
-	aiProvider    ai.AIProvider
-	todoRepo      database.TodoRepositoryInterface
-	contextRepo   database.AIContextRepositoryInterface
-	activityRepo  database.UserActivityRepositoryInterface
-	tagStatsRepo  database.TagStatisticsRepositoryInterface // For loading tag statistics to guide AI
-	jobQueue      queue.JobQueue // For re-enqueueing jobs with delays
+	aiProvider   ai.AIProvider
+	todoRepo     database.TodoRepositoryInterface
+	contextRepo  database.AIContextRepositoryInterface
+	activityRepo database.UserActivityRepositoryInterface
+	tagStatsRepo database.TagStatisticsRepositoryInterface // For loading tag statistics to guide AI
+	jobQueue     queue.JobQueue                            // For re-enqueueing jobs with delays
 }
 
 // NewTaskAnalyzer creates a new task analyzer

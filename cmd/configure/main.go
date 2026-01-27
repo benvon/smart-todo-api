@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/benvon/smart-todo/cmd/configure/commands"
+	"github.com/spf13/cobra"
 )
 
 func main() {

@@ -97,14 +97,14 @@ func main() {
 	todoRepo.SetTagStatsRepo(tagStatsRepo)
 	todoRepo.SetTagChangeHandler(func(ctx context.Context, userID uuid.UUID) error {
 		log.Printf("Tag change handler invoked for user %s", userID)
-		
+
 		// Always mark tag statistics as tainted (ensures stats will be refreshed)
 		_, err := tagStatsRepo.MarkTainted(ctx, userID)
 		if err != nil {
 			log.Printf("Failed to mark tag statistics as tainted for user %s: %v", userID, err)
 			return fmt.Errorf("failed to mark tag statistics as tainted: %w", err)
 		}
-		
+
 		// Always enqueue tag analysis job when tags change
 		// Multiple jobs are fine - the analyzer will process them and re-analyze all todos
 		if jobQueue != nil {
@@ -120,7 +120,7 @@ func main() {
 		} else {
 			log.Printf("Job queue not available, cannot enqueue tag analysis job for user %s", userID)
 		}
-		
+
 		return nil
 	})
 
@@ -221,12 +221,12 @@ func main() {
 	aiRouter := apiRouter.PathPrefix("/ai").Subrouter()
 	aiRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
 	aiRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
-	
+
 	// AI Context routes
 	aiContextHandler := handlers.NewAIContextHandler(contextRepo)
 	contextRouter := aiRouter.PathPrefix("/context").Subrouter()
 	aiContextHandler.RegisterRoutes(contextRouter)
-	
+
 	// Chat routes (if AI provider available)
 	if chatHandler != nil {
 		chatHandler.RegisterRoutes(aiRouter)

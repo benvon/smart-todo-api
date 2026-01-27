@@ -41,17 +41,17 @@ func TestTagStatisticsRepository_UpdateStatistics_VersionConflict(t *testing.T) 
 
 // Mock TagStatisticsRepository for unit tests
 type mockTagStatisticsRepo struct {
-	t                    *testing.T
-	getByUserIDFunc      func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	t                       *testing.T
+	getByUserIDFunc         func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
 	getByUserIDOrCreateFunc func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
-	updateStatisticsFunc func(ctx context.Context, stats *models.TagStatistics) (bool, error)
-	markTaintedFunc      func(ctx context.Context, userID uuid.UUID) (bool, error)
-	
+	updateStatisticsFunc    func(ctx context.Context, stats *models.TagStatistics) (bool, error)
+	markTaintedFunc         func(ctx context.Context, userID uuid.UUID) (bool, error)
+
 	// Call tracking
-	getByUserIDCalls      []uuid.UUID
+	getByUserIDCalls         []uuid.UUID
 	getByUserIDOrCreateCalls []uuid.UUID
-	updateStatisticsCalls []*models.TagStatistics
-	markTaintedCalls      []uuid.UUID
+	updateStatisticsCalls    []*models.TagStatistics
+	markTaintedCalls         []uuid.UUID
 }
 
 func (m *mockTagStatisticsRepo) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error) {

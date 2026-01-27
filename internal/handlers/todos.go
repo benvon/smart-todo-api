@@ -565,7 +565,7 @@ func (h *TodoHandler) GetTagStats(w http.ResponseWriter, r *http.Request) {
 
 	response := TagStatsResponse{
 		TagStats:       stats.TagStats,
-		Tainted:         stats.Tainted,
+		Tainted:        stats.Tainted,
 		LastAnalyzedAt: stats.LastAnalyzedAt,
 	}
 

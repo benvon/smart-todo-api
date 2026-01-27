@@ -8,21 +8,21 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	DatabaseURL         string
-	ServerPort          string
-	BaseURL             string
-	FrontendURL         string
-	OpenAIKey           string
-	AIProvider          string
-	AIModel             string
-	AIBaseURL           string
-	AIMaxPromptTags     int
-	AITagsTokenPercent  int
-	EnableHSTS          bool
-	OIDCProvider        string
-	RedisURL            string
-	RabbitMQURL         string
-	RabbitMQPrefetch    int
+	DatabaseURL        string
+	ServerPort         string
+	BaseURL            string
+	FrontendURL        string
+	OpenAIKey          string
+	AIProvider         string
+	AIModel            string
+	AIBaseURL          string
+	AIMaxPromptTags    int
+	AITagsTokenPercent int
+	EnableHSTS         bool
+	OIDCProvider       string
+	RedisURL           string
+	RabbitMQURL        string
+	RabbitMQPrefetch   int
 }
 
 // Load loads configuration from environment variables

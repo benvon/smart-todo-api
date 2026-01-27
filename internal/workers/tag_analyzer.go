@@ -13,8 +13,8 @@ import (
 
 // TagAnalyzer processes tag analysis jobs to aggregate tag statistics
 type TagAnalyzer struct {
-	todoRepo        database.TodoRepositoryInterface
-	tagStatsRepo    database.TagStatisticsRepositoryInterface
+	todoRepo     database.TodoRepositoryInterface
+	tagStatsRepo database.TagStatisticsRepositoryInterface
 }
 
 // NewTagAnalyzer creates a new tag analyzer
@@ -54,22 +54,22 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	var allTodos []*models.Todo
 	page := 1
 	pageSize := 500
-	
+
 	for {
 		todos, total, err := a.todoRepo.GetByUserIDPaginated(ctx, job.UserID, nil, nil, page, pageSize)
 		if err != nil {
 			return fmt.Errorf("failed to get todos: %w", err)
 		}
-		
+
 		allTodos = append(allTodos, todos...)
-		
+
 		// Check if we've loaded all todos
 		// If this page returned fewer todos than pageSize, we're done
 		// Or if we've loaded all todos according to total count
 		if len(todos) < pageSize || len(allTodos) >= total {
 			break
 		}
-		
+
 		// Move to next page
 		page++
 	}
@@ -89,7 +89,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 			if todo.Status == models.TodoStatusCompleted {
 				completedTodosWithTags++
 			}
-			
+
 			for _, tag := range todo.Metadata.CategoryTags {
 				// Initialize tag stats if not exists
 				if _, exists := tagStatsMap[tag]; !exists {

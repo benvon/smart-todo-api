@@ -15,18 +15,18 @@ import (
 
 // mockTagStatisticsRepoForWorker is a mock for testing tag analyzer worker
 type mockTagStatisticsRepoForWorker struct {
-	t                    *testing.T
-	getByUserIDFunc      func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	t                       *testing.T
+	getByUserIDFunc         func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
 	getByUserIDOrCreateFunc func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
-	updateStatisticsFunc func(ctx context.Context, stats *models.TagStatistics) (bool, error)
-	markTaintedFunc      func(ctx context.Context, userID uuid.UUID) (bool, error)
-	
+	updateStatisticsFunc    func(ctx context.Context, stats *models.TagStatistics) (bool, error)
+	markTaintedFunc         func(ctx context.Context, userID uuid.UUID) (bool, error)
+
 	// Call tracking (protected by mutex for concurrent access)
-	mu                    sync.Mutex
-	getByUserIDCalls      []uuid.UUID
+	mu                       sync.Mutex
+	getByUserIDCalls         []uuid.UUID
 	getByUserIDOrCreateCalls []uuid.UUID
-	updateStatisticsCalls []*models.TagStatistics
-	markTaintedCalls      []uuid.UUID
+	updateStatisticsCalls    []*models.TagStatistics
+	markTaintedCalls         []uuid.UUID
 }
 
 func (m *mockTagStatisticsRepoForWorker) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error) {

@@ -112,7 +112,7 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 type LoginConfig struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
-	ClientID             string `json:"client_id"`
-	RedirectURI          string `json:"redirect_uri"`
-	Scope                string `json:"scope"`
+	ClientID              string `json:"client_id"`
+	RedirectURI           string `json:"redirect_uri"`
+	Scope                 string `json:"scope"`
 }

@@ -7,7 +7,7 @@ func (m *Metadata) MergeTags(aiTags []string, userTags []string) {
 	if m.TagSources == nil {
 		m.TagSources = make(map[string]TagSource)
 	}
-	
+
 	// Start with all tags from AI
 	for _, tag := range aiTags {
 		// Only add if not already present as user tag
@@ -16,7 +16,7 @@ func (m *Metadata) MergeTags(aiTags []string, userTags []string) {
 			m.TagSources[tag] = TagSourceAI
 		}
 	}
-	
+
 	// Add all user tags (they override AI tags)
 	for _, tag := range userTags {
 		m.CategoryTags = appendIfNotExists(m.CategoryTags, tag)
@@ -29,7 +29,7 @@ func (m *Metadata) SetUserTags(tags []string) {
 	if m.TagSources == nil {
 		m.TagSources = make(map[string]TagSource)
 	}
-	
+
 	m.CategoryTags = tags
 	for _, tag := range tags {
 		m.TagSources[tag] = TagSourceUser
@@ -46,7 +46,7 @@ func (m *Metadata) RemoveTag(tag string) {
 		}
 	}
 	m.CategoryTags = newTags
-	
+
 	// Remove from tag sources
 	if m.TagSources != nil {
 		delete(m.TagSources, tag)
@@ -58,7 +58,7 @@ func (m *Metadata) AddTag(tag string, source TagSource) {
 	if m.TagSources == nil {
 		m.TagSources = make(map[string]TagSource)
 	}
-	
+
 	// Add to category tags if not already present
 	m.CategoryTags = appendIfNotExists(m.CategoryTags, tag)
 	m.TagSources[tag] = source
@@ -69,14 +69,14 @@ func (m *Metadata) GetUserTags() []string {
 	if m.TagSources == nil {
 		return nil
 	}
-	
+
 	userTags := make([]string, 0)
 	for _, tag := range m.CategoryTags {
 		if m.TagSources[tag] == TagSourceUser {
 			userTags = append(userTags, tag)
 		}
 	}
-	
+
 	return userTags
 }
 
@@ -85,14 +85,14 @@ func (m *Metadata) GetAITags() []string {
 	if m.TagSources == nil {
 		return nil
 	}
-	
+
 	aiTags := make([]string, 0)
 	for _, tag := range m.CategoryTags {
 		if m.TagSources[tag] == TagSourceAI {
 			aiTags = append(aiTags, tag)
 		}
 	}
-	
+
 	return aiTags
 }
 

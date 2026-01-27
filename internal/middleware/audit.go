@@ -18,14 +18,14 @@ func Audit(next http.Handler) http.Handler {
 		if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
 			// Log failed authentication/authorization attempts
 			ip := getClientIP(r)
-			log.Printf("[AUDIT] Security event: status=%d method=%s path=%s ip=%s", 
+			log.Printf("[AUDIT] Security event: status=%d method=%s path=%s ip=%s",
 				statusCode, r.Method, r.URL.Path, ip)
 		}
-		
+
 		// Log rate limit violations (429 Too Many Requests)
 		if statusCode == http.StatusTooManyRequests {
 			ip := getClientIP(r)
-			log.Printf("[AUDIT] Rate limit violation: method=%s path=%s ip=%s", 
+			log.Printf("[AUDIT] Rate limit violation: method=%s path=%s ip=%s",
 				r.Method, r.URL.Path, ip)
 		}
 	})

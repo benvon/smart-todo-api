@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/google/uuid"
-	"github.com/spf13/cobra"
 	"github.com/benvon/smart-todo/internal/config"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
+	"github.com/spf13/cobra"
 )
 
 // NewOIDCCmd creates the OIDC configuration command
@@ -23,7 +23,7 @@ func NewOIDCCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := args[0]
-			
+
 			// Validate provider name (basic validation - must not be empty)
 			if provider == "" {
 				return fmt.Errorf("provider name cannot be empty")

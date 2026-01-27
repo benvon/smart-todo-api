@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/benvon/smart-todo/internal/config"
 	"github.com/benvon/smart-todo/internal/database"
+	"github.com/spf13/cobra"
 )
 
 // NewTestCmd creates the test command

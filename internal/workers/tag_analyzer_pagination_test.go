@@ -15,7 +15,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_LoadsAllPages(t *testing.T) {
 	t.Parallel()
 
 	userID := uuid.New()
-	
+
 	// Create 750 todos (more than one page of 500)
 	allTodos := make([]*models.Todo, 750)
 	for i := 0; i < 750; i++ {
@@ -43,7 +43,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_LoadsAllPages(t *testing.T) {
 			if end > len(allTodos) {
 				end = len(allTodos)
 			}
-			
+
 			// Return the appropriate page
 			pageTodos := allTodos[offset:end]
 			return pageTodos, len(allTodos), nil

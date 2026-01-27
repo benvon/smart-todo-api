@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 // UserRepository handles user database operations
@@ -27,7 +27,7 @@ func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at, updated_at
 	`
-	
+
 	now := time.Now()
 	err := r.db.QueryRowContext(ctx, query,
 		user.ID,
@@ -38,11 +38,11 @@ func (r *UserRepository) Create(ctx context.Context, user *models.User) error {
 		now,
 		now,
 	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -54,7 +54,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Use
 		FROM users
 		WHERE id = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&user.ID,
 		&user.Email,
@@ -64,14 +64,14 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Use
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user: %w", err)
 	}
-	
+
 	return user, nil
 }
 
@@ -83,7 +83,7 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*models.
 		FROM users
 		WHERE email = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, email).Scan(
 		&user.ID,
 		&user.Email,
@@ -93,14 +93,14 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*models.
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
-	
+
 	return user, nil
 }
 
@@ -112,7 +112,7 @@ func (r *UserRepository) GetByProviderID(ctx context.Context, providerID string)
 		FROM users
 		WHERE provider_id = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, providerID).Scan(
 		&user.ID,
 		&user.Email,
@@ -122,14 +122,14 @@ func (r *UserRepository) GetByProviderID(ctx context.Context, providerID string)
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by provider ID: %w", err)
 	}
-	
+
 	return user, nil
 }
 
@@ -141,7 +141,7 @@ func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
 		WHERE id = $1
 		RETURNING updated_at
 	`
-	
+
 	now := time.Now()
 	err := r.db.QueryRowContext(ctx, query,
 		user.ID,
@@ -151,34 +151,34 @@ func (r *UserRepository) Update(ctx context.Context, user *models.User) error {
 		user.EmailVerified,
 		now,
 	).Scan(&user.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("user not found")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
-	
+
 	return nil
 }
 
 // Delete deletes a user by ID
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM users WHERE id = $1`
-	
+
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete user: %w", err)
 	}
-	
+
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
-	
+
 	if rowsAffected == 0 {
 		return fmt.Errorf("user not found")
 	}
-	
+
 	return nil
 }

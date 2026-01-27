@@ -17,13 +17,13 @@ func ActivityTracking(activityRepo *database.UserActivityRepository) func(http.H
 			user := UserFromContext(r)
 			if user != nil {
 				ctx := r.Context()
-				
+
 				// Update last API interaction
 				if err := activityRepo.UpdateLastInteraction(ctx, user.ID); err != nil {
 					log.Printf("Failed to update user activity: %v", err)
 					// Don't fail the request if activity tracking fails
 				}
-				
+
 				// Check if reprocessing should be paused (3 days inactivity)
 				// This check happens on every request but only updates if needed
 				// This runs in a background goroutine independent of the request lifecycle
@@ -33,14 +33,14 @@ func ActivityTracking(activityRepo *database.UserActivityRepository) func(http.H
 					// The timeout ensures the operation completes even if the parent is cancelled
 					checkCtx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 					defer cancel()
-					
+
 					// Get users needing pause
 					usersToPause, err := activityRepo.GetUsersNeedingReprocessingPause(checkCtx)
 					if err != nil {
 						log.Printf("Failed to check users needing pause: %v", err)
 						return
 					}
-					
+
 					// Pause reprocessing for inactive users
 					for _, userID := range usersToPause {
 						if err := activityRepo.SetReprocessingPaused(checkCtx, userID, true); err != nil {
@@ -49,7 +49,7 @@ func ActivityTracking(activityRepo *database.UserActivityRepository) func(http.H
 					}
 				}(ctx)
 			}
-			
+
 			next.ServeHTTP(w, r)
 		})
 	}
@@ -57,14 +57,14 @@ func ActivityTracking(activityRepo *database.UserActivityRepository) func(http.H
 
 // ActivityTracker is a simpler version that can be used as a helper
 type ActivityTracker struct {
-	activityRepo *database.UserActivityRepository
+	activityRepo  *database.UserActivityRepository
 	checkInterval time.Duration
 }
 
 // NewActivityTracker creates a new activity tracker
 func NewActivityTracker(activityRepo *database.UserActivityRepository) *ActivityTracker {
 	return &ActivityTracker{
-		activityRepo: activityRepo,
+		activityRepo:  activityRepo,
 		checkInterval: 1 * time.Hour, // Check every hour
 	}
 }
@@ -73,7 +73,7 @@ func NewActivityTracker(activityRepo *database.UserActivityRepository) *Activity
 func (at *ActivityTracker) Start(ctx context.Context) {
 	ticker := time.NewTicker(at.checkInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -84,7 +84,7 @@ func (at *ActivityTracker) Start(ctx context.Context) {
 				log.Printf("Failed to check users needing pause: %v", err)
 				continue
 			}
-			
+
 			for _, userID := range usersToPause {
 				if err := at.activityRepo.SetReprocessingPaused(ctx, userID, true); err != nil {
 					log.Printf("Failed to pause reprocessing for user %s: %v", userID, err)

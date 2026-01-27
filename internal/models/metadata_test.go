@@ -84,9 +84,9 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 		{
 			name: "all fields including time_horizon_user_override",
 			metadata: Metadata{
-				CategoryTags:          []string{"work"},
-				Priority:              stringPtr("high"),
-				TimeEntered:           stringPtr("2024-03-15T14:30:00Z"),
+				CategoryTags:            []string{"work"},
+				Priority:                stringPtr("high"),
+				TimeEntered:             stringPtr("2024-03-15T14:30:00Z"),
 				TimeHorizonUserOverride: boolPtr(true),
 			},
 			jsonStr: `{"category_tags":["work"],"priority":"high","time_entered":"2024-03-15T14:30:00Z","time_horizon_user_override":true}`,

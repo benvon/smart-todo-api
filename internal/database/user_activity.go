@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 // UserActivityRepository handles user activity database operations
@@ -22,13 +22,13 @@ func NewUserActivityRepository(db *DB) *UserActivityRepository {
 // GetByUserID retrieves user activity by user ID
 func (r *UserActivityRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error) {
 	activity := &models.UserActivity{}
-	
+
 	query := `
 		SELECT user_id, last_api_interaction, reprocessing_paused, created_at, updated_at
 		FROM user_activity
 		WHERE user_id = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, userID).Scan(
 		&activity.UserID,
 		&activity.LastAPIInteraction,
@@ -36,11 +36,11 @@ func (r *UserActivityRepository) GetByUserID(ctx context.Context, userID uuid.UU
 		&activity.CreatedAt,
 		&activity.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user activity: %w", err)
 	}
-	
+
 	return activity, nil
 }
 
@@ -55,7 +55,7 @@ func (r *UserActivityRepository) Upsert(ctx context.Context, activity *models.Us
 		    updated_at = EXCLUDED.updated_at
 		RETURNING created_at, updated_at
 	`
-	
+
 	now := time.Now()
 	err := r.db.QueryRowContext(ctx, query,
 		activity.UserID,
@@ -64,11 +64,11 @@ func (r *UserActivityRepository) Upsert(ctx context.Context, activity *models.Us
 		now,
 		now,
 	).Scan(&activity.CreatedAt, &activity.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to upsert user activity: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -82,13 +82,13 @@ func (r *UserActivityRepository) UpdateLastInteraction(ctx context.Context, user
 		    reprocessing_paused = false,
 		    updated_at = EXCLUDED.updated_at
 	`
-	
+
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx, query, userID, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to update last interaction: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -99,12 +99,12 @@ func (r *UserActivityRepository) SetReprocessingPaused(ctx context.Context, user
 		SET reprocessing_paused = $1, updated_at = $2
 		WHERE user_id = $3
 	`
-	
+
 	_, err := r.db.ExecContext(ctx, query, paused, time.Now(), userID)
 	if err != nil {
 		return fmt.Errorf("failed to set reprocessing paused: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -116,7 +116,7 @@ func (r *UserActivityRepository) GetEligibleUsersForReprocessing(ctx context.Con
 		FROM user_activity
 		WHERE reprocessing_paused = false
 	`
-	
+
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query eligible users: %w", err)
@@ -127,7 +127,7 @@ func (r *UserActivityRepository) GetEligibleUsersForReprocessing(ctx context.Con
 			_ = err
 		}
 	}()
-	
+
 	var userIDs []uuid.UUID
 	for rows.Next() {
 		var userID uuid.UUID
@@ -136,11 +136,11 @@ func (r *UserActivityRepository) GetEligibleUsersForReprocessing(ctx context.Con
 		}
 		userIDs = append(userIDs, userID)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating users: %w", err)
 	}
-	
+
 	return userIDs, nil
 }
 
@@ -152,7 +152,7 @@ func (r *UserActivityRepository) GetUsersNeedingReprocessingPause(ctx context.Co
 		WHERE last_api_interaction < NOW() - INTERVAL '3 days'
 		  AND reprocessing_paused = false
 	`
-	
+
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query users needing pause: %w", err)
@@ -163,7 +163,7 @@ func (r *UserActivityRepository) GetUsersNeedingReprocessingPause(ctx context.Co
 			_ = err
 		}
 	}()
-	
+
 	var userIDs []uuid.UUID
 	for rows.Next() {
 		var userID uuid.UUID
@@ -172,10 +172,10 @@ func (r *UserActivityRepository) GetUsersNeedingReprocessingPause(ctx context.Co
 		}
 		userIDs = append(userIDs, userID)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating users: %w", err)
 	}
-	
+
 	return userIDs, nil
 }

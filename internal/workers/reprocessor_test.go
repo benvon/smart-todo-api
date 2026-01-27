@@ -23,9 +23,9 @@ func contains(s, substr string) bool {
 type mockJobQueueForReprocessor struct {
 	t           *testing.T
 	enqueueFunc func(ctx context.Context, job *queue.Job) error
-	
+
 	// Call tracking (protected by mutex for concurrent access)
-	mu          sync.Mutex
+	mu           sync.Mutex
 	enqueueCalls []*queue.Job
 }
 
@@ -60,13 +60,13 @@ var _ queue.JobQueue = (*mockJobQueueForReprocessor)(nil)
 
 // mockUserActivityRepoForReprocessor is a mock implementation of UserActivityRepositoryInterface for reprocessor tests
 type mockUserActivityRepoForReprocessor struct {
-	t                                  *testing.T
-	getByUserIDFunc                    func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
+	t                                   *testing.T
+	getByUserIDFunc                     func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
 	getEligibleUsersForReprocessingFunc func(ctx context.Context) ([]uuid.UUID, error)
-	
+
 	// Call tracking (protected by mutex for concurrent access)
-	mu                                  sync.Mutex
-	getByUserIDCalls                    []uuid.UUID
+	mu                                   sync.Mutex
+	getByUserIDCalls                     []uuid.UUID
 	getEligibleUsersForReprocessingCalls int
 }
 

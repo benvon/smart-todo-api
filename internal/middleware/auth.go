@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/services/oidc"
+	"github.com/google/uuid"
 )
 
 // getClientIP extracts the client IP from the request, respecting X-Forwarded-For

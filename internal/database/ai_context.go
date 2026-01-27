@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 // AIContextRepository handles AI context database operations
@@ -24,13 +24,13 @@ func NewAIContextRepository(db *DB) *AIContextRepository {
 func (r *AIContextRepository) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.AIContext, error) {
 	aiContext := &models.AIContext{}
 	var preferencesJSON []byte
-	
+
 	query := `
 		SELECT id, user_id, context_summary, preferences, created_at, updated_at
 		FROM ai_context
 		WHERE user_id = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, userID).Scan(
 		&aiContext.ID,
 		&aiContext.UserID,
@@ -39,17 +39,17 @@ func (r *AIContextRepository) GetByUserID(ctx context.Context, userID uuid.UUID)
 		&aiContext.CreatedAt,
 		&aiContext.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get AI context: %w", err)
 	}
-	
+
 	if len(preferencesJSON) > 0 {
 		if err := json.Unmarshal(preferencesJSON, &aiContext.Preferences); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal preferences: %w", err)
 		}
 	}
-	
+
 	return aiContext, nil
 }
 
@@ -60,12 +60,12 @@ func (r *AIContextRepository) Create(ctx context.Context, aiContext *models.AICo
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at, updated_at
 	`
-	
+
 	preferencesJSON, err := json.Marshal(aiContext.Preferences)
 	if err != nil {
 		return fmt.Errorf("failed to marshal preferences: %w", err)
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		aiContext.ID,
@@ -75,11 +75,11 @@ func (r *AIContextRepository) Create(ctx context.Context, aiContext *models.AICo
 		now,
 		now,
 	).Scan(&aiContext.CreatedAt, &aiContext.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to create AI context: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -91,12 +91,12 @@ func (r *AIContextRepository) Update(ctx context.Context, aiContext *models.AICo
 		WHERE user_id = $1
 		RETURNING id, created_at, updated_at
 	`
-	
+
 	preferencesJSON, err := json.Marshal(aiContext.Preferences)
 	if err != nil {
 		return fmt.Errorf("failed to marshal preferences: %w", err)
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		aiContext.UserID,
@@ -104,11 +104,11 @@ func (r *AIContextRepository) Update(ctx context.Context, aiContext *models.AICo
 		preferencesJSON,
 		now,
 	).Scan(&aiContext.ID, &aiContext.CreatedAt, &aiContext.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to update AI context: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -117,7 +117,7 @@ func (r *AIContextRepository) Upsert(ctx context.Context, aiContext *models.AICo
 	if aiContext.ID == uuid.Nil {
 		aiContext.ID = uuid.New()
 	}
-	
+
 	query := `
 		INSERT INTO ai_context (id, user_id, context_summary, preferences, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -127,12 +127,12 @@ func (r *AIContextRepository) Upsert(ctx context.Context, aiContext *models.AICo
 		    updated_at = EXCLUDED.updated_at
 		RETURNING created_at, updated_at
 	`
-	
+
 	preferencesJSON, err := json.Marshal(aiContext.Preferences)
 	if err != nil {
 		return fmt.Errorf("failed to marshal preferences: %w", err)
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		aiContext.ID,
@@ -142,10 +142,10 @@ func (r *AIContextRepository) Upsert(ctx context.Context, aiContext *models.AICo
 		now,
 		now,
 	).Scan(&aiContext.CreatedAt, &aiContext.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to upsert AI context: %w", err)
 	}
-	
+
 	return nil
 }

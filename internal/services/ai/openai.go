@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,21 @@ const (
 	DefaultMaxPromptTags = 30
 	// DefaultTagsTokenPercent is the default percentage of available tokens to allocate for tags
 	DefaultTagsTokenPercent = 20
+	
+	// Token estimation constants
+	// CharsPerToken is a rough estimate for token counting (1 token ≈ 4 characters for English text)
+	CharsPerToken = 4
+	// MaxContextTokens is a conservative estimate of model context limits
+	// Set to 8000 to work safely with most models (GPT-3.5/4 have 8192, but we leave room for response)
+	MaxContextTokens = 8000
+	
+	// Tag scoring constants
+	// RelevanceWeight is the weight given to tag relevance in scoring (0.0-1.0)
+	RelevanceWeight = 0.7
+	// FrequencyWeight is the weight given to tag frequency in scoring (0.0-1.0)
+	FrequencyWeight = 0.3
+	// FrequencyNormalizer is used to normalize frequency scores to a 0-1 range
+	FrequencyNormalizer = 100.0
 
 	// ErrNoChoicesInResponse is returned when the API response has no choices
 	ErrNoChoicesInResponse = "no choices in response"
@@ -34,10 +50,10 @@ const (
 
 // OpenAIProvider implements the AIProvider interface using OpenAI's API
 type OpenAIProvider struct {
-	client             openai.Client
-	model              string
-	maxPromptTags      int
-	tagsTokenPercent   int
+	client           openai.Client
+	model            string
+	maxPromptTags    int
+	tagsTokenPercent int
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
@@ -347,10 +363,10 @@ Return only valid JSON.`
 	// Include tag statistics to guide tag selection
 	if tagStats != nil && len(tagStats.TagStats) > 0 {
 		prompt += "\n\nExisting tags (prefer reusing these when semantically similar):"
-		
+
 		// Select tags using smart algorithm that considers both frequency and relevance
 		selectedTags := p.selectTagsForPrompt(text, tagStats, prompt)
-		
+
 		for _, entry := range selectedTags {
 			stats := tagStats.TagStats[entry.tag]
 			prompt += fmt.Sprintf("\n- %s (used %d times", entry.tag, stats.Total)
@@ -359,7 +375,7 @@ Return only valid JSON.`
 			}
 			prompt += ")"
 		}
-		
+
 		prompt += "\n\nTag selection guidance:"
 		prompt += "\n- Prefer reusing existing tags when they are semantically similar or closely related to the todo item"
 		prompt += "\n- Only create new tags if no existing tag is a good match (consider synonyms, related concepts, and variations)"
@@ -393,51 +409,46 @@ func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.T
 	if tagsTokenPercent == 0 {
 		tagsTokenPercent = DefaultTagsTokenPercent
 	}
-	
+
 	// Calculate available tokens for tags based on configured percentage
-	// Rough estimate: 1 token ~= 4 characters for English text
-	currentTokens := len(currentPrompt) / 4
+	// Rough estimate: 1 token ~= CharsPerToken characters for English text
+	currentTokens := len(currentPrompt) / CharsPerToken
 	
-	// Common model context limits (conservative estimates)
-	maxContextTokens := 8000 // Safe limit for most models
-	maxTagTokens := (maxContextTokens - currentTokens) * tagsTokenPercent / 100
-	
+	// Use conservative context limit to work safely with most models
+	maxTagTokens := (MaxContextTokens - currentTokens) * tagsTokenPercent / 100
+
 	// Build tag list with relevance scores
 	tagList := make([]tagEntry, 0, len(tagStats.TagStats))
 	todoLower := strings.ToLower(todoText)
-	
+
 	for tag, stats := range tagStats.TagStats {
 		// Calculate relevance score
 		relevance := p.calculateTagRelevance(tag, todoLower)
-		
+
 		// Calculate frequency score (normalize by max possible)
 		// Higher usage count means higher frequency score
 		frequencyScore := float64(stats.Total)
-		
-		// Combined score: 70% relevance + 30% frequency
+
+		// Combined score: RelevanceWeight * relevance + FrequencyWeight * frequency
 		// Prioritize relevance but still favor frequently used tags
-		combinedScore := (0.7 * relevance) + (0.3 * frequencyScore/100.0)
-		
+		combinedScore := (RelevanceWeight * relevance) + (FrequencyWeight * frequencyScore/FrequencyNormalizer)
+
 		tagList = append(tagList, tagEntry{
 			tag:   tag,
 			total: stats.Total,
 			score: combinedScore,
 		})
 	}
-	
-	// Sort by combined score (descending)
-	for i := 0; i < len(tagList)-1; i++ {
-		for j := i + 1; j < len(tagList); j++ {
-			if tagList[i].score < tagList[j].score {
-				tagList[i], tagList[j] = tagList[j], tagList[i]
-			}
-		}
-	}
-	
+
+	// Sort by combined score (descending) using Go's built-in sort
+	sort.Slice(tagList, func(i, j int) bool {
+		return tagList[i].score > tagList[j].score
+	})
+
 	// Select tags within token budget and count limits
 	selectedTags := make([]tagEntry, 0, maxPromptTags)
 	usedTokens := 0
-	
+
 	for _, entry := range tagList {
 		// Estimate tokens for this tag entry
 		// Format: "- tagname (used N times, X AI-generated, Y user-defined)\n"
@@ -445,8 +456,8 @@ func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.T
 			entry.tag, entry.total,
 			tagStats.TagStats[entry.tag].AI,
 			tagStats.TagStats[entry.tag].User)
-		tagTokens := len(tagEntryText) / 4
-		
+		tagTokens := len(tagEntryText) / CharsPerToken
+
 		// Check if adding this tag would exceed limits
 		if len(selectedTags) >= maxPromptTags {
 			break
@@ -454,11 +465,11 @@ func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.T
 		if usedTokens+tagTokens > maxTagTokens {
 			break
 		}
-		
+
 		selectedTags = append(selectedTags, entry)
 		usedTokens += tagTokens
 	}
-	
+
 	return selectedTags
 }
 
@@ -466,16 +477,16 @@ func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.T
 // Returns a score between 0 and 1
 func (p *OpenAIProvider) calculateTagRelevance(tag string, todoTextLower string) float64 {
 	tagLower := strings.ToLower(tag)
-	
+
 	// Exact match (case-insensitive)
 	if strings.Contains(todoTextLower, tagLower) {
 		return 1.0
 	}
-	
+
 	// Check for partial matches (word-based)
 	tagWords := strings.Fields(tagLower)
 	todoWords := strings.Fields(todoTextLower)
-	
+
 	matchCount := 0
 	for _, tagWord := range tagWords {
 		for _, todoWord := range todoWords {
@@ -491,14 +502,14 @@ func (p *OpenAIProvider) calculateTagRelevance(tag string, todoTextLower string)
 			}
 		}
 	}
-	
+
 	if len(tagWords) > 0 {
 		wordMatchScore := float64(matchCount) / float64(len(tagWords))
 		if wordMatchScore > 0 {
 			return 0.5 + (wordMatchScore * 0.5) // Score between 0.5 and 1.0 for partial matches
 		}
 	}
-	
+
 	// No match - return base score (still might be selected based on frequency)
 	return 0.1
 }
@@ -513,16 +524,16 @@ func RegisterOpenAI(registry *ProviderRegistry) {
 
 		model := config["model"]
 		baseURL := config["base_url"]
-		
+
 		provider := NewOpenAIProviderWithConfig(apiKey, baseURL, model)
-		
+
 		// Apply optional configuration
 		if maxTags := config["max_prompt_tags"]; maxTags != "" {
 			if val, err := parseIntOrDefault(maxTags, DefaultMaxPromptTags); err == nil {
 				provider.maxPromptTags = val
 			}
 		}
-		
+
 		if tokenPercent := config["tags_token_percent"]; tokenPercent != "" {
 			if val, err := parseIntOrDefault(tokenPercent, DefaultTagsTokenPercent); err == nil {
 				provider.tagsTokenPercent = val

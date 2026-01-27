@@ -96,8 +96,8 @@ func TestLoad(t *testing.T) {
 		{
 			name: "OPENAI_API_KEY optional",
 			envVars: map[string]string{
-				"DATABASE_URL":  "postgres://user:pass@localhost/db",
-				"RABBITMQ_URL":  "amqp://guest:guest@localhost:5672/",
+				"DATABASE_URL":   "postgres://user:pass@localhost/db",
+				"RABBITMQ_URL":   "amqp://guest:guest@localhost:5672/",
 				"OPENAI_API_KEY": "sk-test-key",
 			},
 			expectError: false,

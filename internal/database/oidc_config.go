@@ -26,7 +26,7 @@ func (r *OIDCConfigRepository) Create(ctx context.Context, config *models.OIDCCo
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING created_at, updated_at
 	`
-	
+
 	now := time.Now()
 	err := r.db.QueryRowContext(ctx, query,
 		config.ID,
@@ -40,11 +40,11 @@ func (r *OIDCConfigRepository) Create(ctx context.Context, config *models.OIDCCo
 		now,
 		now,
 	).Scan(&config.CreatedAt, &config.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to create OIDC config: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -56,7 +56,7 @@ func (r *OIDCConfigRepository) GetByProvider(ctx context.Context, provider strin
 		FROM oidc_config
 		WHERE provider = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, provider).Scan(
 		&config.ID,
 		&config.Provider,
@@ -69,14 +69,14 @@ func (r *OIDCConfigRepository) GetByProvider(ctx context.Context, provider strin
 		&config.CreatedAt,
 		&config.UpdatedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("OIDC config not found for provider %s: %w", provider, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get OIDC config: %w", err)
 	}
-	
+
 	return config, nil
 }
 
@@ -87,7 +87,7 @@ func (r *OIDCConfigRepository) GetAll(ctx context.Context) ([]*models.OIDCConfig
 		FROM oidc_config
 		ORDER BY provider
 	`
-	
+
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query OIDC configs: %w", err)
@@ -100,7 +100,7 @@ func (r *OIDCConfigRepository) GetAll(ctx context.Context) ([]*models.OIDCConfig
 			_ = err // Explicitly ignore error to satisfy linter
 		}
 	}()
-	
+
 	var configs []*models.OIDCConfig
 	for rows.Next() {
 		config := &models.OIDCConfig{}
@@ -121,11 +121,11 @@ func (r *OIDCConfigRepository) GetAll(ctx context.Context) ([]*models.OIDCConfig
 		}
 		configs = append(configs, config)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating OIDC configs: %w", err)
 	}
-	
+
 	return configs, nil
 }
 
@@ -137,7 +137,7 @@ func (r *OIDCConfigRepository) Update(ctx context.Context, config *models.OIDCCo
 		WHERE provider = $1
 		RETURNING updated_at
 	`
-	
+
 	now := time.Now()
 	err := r.db.QueryRowContext(ctx, query,
 		config.Provider,
@@ -149,34 +149,34 @@ func (r *OIDCConfigRepository) Update(ctx context.Context, config *models.OIDCCo
 		config.JWKSUrl,
 		now,
 	).Scan(&config.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("OIDC config not found")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update OIDC config: %w", err)
 	}
-	
+
 	return nil
 }
 
 // Delete deletes an OIDC configuration by provider
 func (r *OIDCConfigRepository) Delete(ctx context.Context, provider string) error {
 	query := `DELETE FROM oidc_config WHERE provider = $1`
-	
+
 	result, err := r.db.ExecContext(ctx, query, provider)
 	if err != nil {
 		return fmt.Errorf("failed to delete OIDC config: %w", err)
 	}
-	
+
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
-	
+
 	if rowsAffected == 0 {
 		return fmt.Errorf("OIDC config not found")
 	}
-	
+
 	return nil
 }

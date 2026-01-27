@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 // Verifier verifies JWT tokens

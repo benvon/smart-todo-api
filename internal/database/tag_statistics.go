@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 // TagStatisticsRepository handles tag statistics database operations

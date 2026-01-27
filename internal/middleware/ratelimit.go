@@ -106,16 +106,16 @@ func (c *redisLimitCounter) Increment(ctx context.Context) (int, error) {
 	prevWindowStart := windowStart.Add(-c.window)
 	prevKey := fmt.Sprintf("%s:%d", c.key, prevWindowStart.Unix())
 	prevCount := c.client.Get(ctx, prevKey).Val()
-		if prevCount != "" {
-			// Calculate sliding window count (proportional to remaining time in previous window)
-			elapsed := now.Sub(windowStart)
-			var prevWindowCount int
-			if _, err := fmt.Sscanf(prevCount, "%d", &prevWindowCount); err == nil && prevWindowCount > 0 {
-				// Weight the previous window count by how much time is left
-				remainingRatio := float64(c.window-elapsed) / float64(c.window)
-				count += int(float64(prevWindowCount) * remainingRatio)
-			}
+	if prevCount != "" {
+		// Calculate sliding window count (proportional to remaining time in previous window)
+		elapsed := now.Sub(windowStart)
+		var prevWindowCount int
+		if _, err := fmt.Sscanf(prevCount, "%d", &prevWindowCount); err == nil && prevWindowCount > 0 {
+			// Weight the previous window count by how much time is left
+			remainingRatio := float64(c.window-elapsed) / float64(c.window)
+			count += int(float64(prevWindowCount) * remainingRatio)
 		}
+	}
 
 	return count, nil
 }

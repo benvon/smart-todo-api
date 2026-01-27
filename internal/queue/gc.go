@@ -28,7 +28,7 @@ func NewGarbageCollector(queue JobQueue, interval time.Duration, retention time.
 func (gc *GarbageCollector) Start(ctx context.Context) error {
 	ticker := time.NewTicker(gc.interval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -48,12 +48,12 @@ func (gc *GarbageCollector) collect(ctx context.Context) error {
 	// For now, this is a placeholder that would need to be implemented
 	// based on the specific queue implementation (RabbitMQ has methods to
 	// query DLQ messages)
-	
+
 	// The actual implementation would:
 	// 1. Query the DLQ for expired messages (older than retention period)
 	// 2. Optionally archive them to a database
 	// 3. Delete old archived jobs after extended retention (e.g., 30 days)
 	// 4. Monitor queue sizes and alert on buildup
-	
+
 	return nil
 }
