@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -120,7 +121,7 @@ func main() {
 				log.Printf("Failed to enqueue tag analysis job for user %s: %v", userID, err)
 				// If both operations failed, return combined error
 				if markTaintedErr != nil {
-					return fmt.Errorf("failed to mark tainted and enqueue job: %w; %w", markTaintedErr, err)
+					return errors.Join(markTaintedErr, fmt.Errorf("failed to enqueue tag analysis job: %w", err))
 				}
 				return fmt.Errorf("failed to enqueue tag analysis job: %w", err)
 			}
