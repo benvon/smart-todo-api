@@ -185,7 +185,7 @@ func TestTagChangeHandler_ErrorHandling(t *testing.T) {
 			description:       "Handler should fail if job cannot be enqueued",
 		},
 		{
-			name:              "handler continues with both errors but job enqueued attempted",
+			name:              "handler continues with both errors but job enqueue attempted",
 			markTaintedError:  errors.New("database connection failed"),
 			enqueueError:      errors.New("queue connection failed"),
 			expectJobEnqueue:  false,

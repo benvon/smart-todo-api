@@ -99,9 +99,8 @@ func main() {
 	todoRepo.SetTagChangeHandler(func(ctx context.Context, userID uuid.UUID) error {
 		log.Printf("Tag change handler invoked for user %s", userID)
 		
-		var markTaintedErr error
-		
 		// Attempt to mark tag statistics as tainted (ensures stats will be refreshed)
+		var markTaintedErr error
 		_, err := tagStatsRepo.MarkTainted(ctx, userID)
 		if err != nil {
 			log.Printf("Failed to mark tag statistics as tainted for user %s: %v", userID, err)
