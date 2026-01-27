@@ -434,3 +434,7 @@ func TestTodoHandler_GetTagStats_DefensiveNilCheck(t *testing.T) {
 		t.Errorf("Expected error message 'Tag statistics are not available', got '%s'", errorResp.Message)
 	}
 }
+
+func boolPtr(b bool) *bool {
+return &b
+}
