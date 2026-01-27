@@ -247,23 +247,17 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 }
 
 // Update updates an existing todo
-// oldTags should be the CategoryTags from the existing todo before the update (pass nil if unknown)
+// oldTags should be the CategoryTags from the existing todo before the update (pass nil to skip tag change detection)
 func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags []string) error {
 	// Detect tag changes if tag statistics support is enabled
-	var newTags []string
 	var tagsChanged bool
 	if r.tagStatsRepo != nil && oldTags != nil {
-		// Normalize nil slices to empty slices for comparison
-		if todo.Metadata.CategoryTags == nil {
-			newTags = []string{}
-		} else {
-			newTags = todo.Metadata.CategoryTags
-		}
-		tagsChanged = !tagsEqual(oldTags, newTags)
+		// Compare tags using tagsEqual which handles nil normalization
+		tagsChanged = !tagsEqual(oldTags, todo.Metadata.CategoryTags)
 		if tagsChanged {
-			log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, newTags)
+			log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, todo.Metadata.CategoryTags)
 		} else {
-			log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, newTags)
+			log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, todo.Metadata.CategoryTags)
 		}
 	} else {
 		if r.tagStatsRepo == nil {
