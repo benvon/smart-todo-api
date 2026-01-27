@@ -4,13 +4,22 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
+	"github.com/google/uuid"
 )
+
+// TagStatsCache represents a cached tag statistics entry
+type TagStatsCache struct {
+	stats   *models.TagStatistics
+	expires time.Time
+	mu      sync.RWMutex
+}
 
 // TaskAnalyzer processes task analysis jobs
 type TaskAnalyzer struct {
@@ -19,7 +28,10 @@ type TaskAnalyzer struct {
 	contextRepo   database.AIContextRepositoryInterface
 	activityRepo  database.UserActivityRepositoryInterface
 	tagStatsRepo  database.TagStatisticsRepositoryInterface // For loading tag statistics to guide AI
-	jobQueue      queue.JobQueue // For re-enqueueing jobs with delays
+	jobQueue      queue.JobQueue                            // For re-enqueueing jobs with delays
+	tagStatsCache map[uuid.UUID]*TagStatsCache              // Cache for tag statistics by user ID
+	cacheMu       sync.RWMutex                              // Mutex for cache map
+	cacheTTL      time.Duration                             // Cache TTL (default 3 minutes)
 }
 
 // NewTaskAnalyzer creates a new task analyzer
@@ -32,13 +44,58 @@ func NewTaskAnalyzer(
 	jobQueue queue.JobQueue,
 ) *TaskAnalyzer {
 	return &TaskAnalyzer{
-		aiProvider:   aiProvider,
-		todoRepo:     todoRepo,
-		contextRepo:  contextRepo,
-		activityRepo: activityRepo,
-		tagStatsRepo: tagStatsRepo,
-		jobQueue:     jobQueue,
+		aiProvider:    aiProvider,
+		todoRepo:      todoRepo,
+		contextRepo:   contextRepo,
+		activityRepo:  activityRepo,
+		tagStatsRepo:  tagStatsRepo,
+		jobQueue:      jobQueue,
+		tagStatsCache: make(map[uuid.UUID]*TagStatsCache),
+		cacheTTL:      3 * time.Minute, // Default 3 minutes TTL
 	}
+}
+
+// getTagStatistics retrieves tag statistics for a user, using cache when available
+func (a *TaskAnalyzer) getTagStatistics(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error) {
+	if a.tagStatsRepo == nil {
+		return nil, nil
+	}
+
+	// Check cache first
+	a.cacheMu.RLock()
+	cache, exists := a.tagStatsCache[userID]
+	if exists {
+		cache.mu.RLock()
+		if time.Now().Before(cache.expires) && cache.stats != nil {
+			stats := cache.stats
+			cache.mu.RUnlock()
+			a.cacheMu.RUnlock()
+			return stats, nil
+		}
+		cache.mu.RUnlock()
+	}
+	a.cacheMu.RUnlock()
+
+	// Fetch from database
+	stats, err := a.tagStatsRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if stats == nil {
+		return nil, nil
+	}
+
+	// Update cache
+	a.cacheMu.Lock()
+	a.tagStatsCache[userID] = &TagStatsCache{
+		stats:   stats,
+		expires: time.Now().Add(a.cacheTTL),
+		mu:      sync.RWMutex{},
+	}
+	a.cacheMu.Unlock()
+
+	return stats, nil
 }
 
 // ProcessTaskAnalysisJob processes a task analysis job
@@ -67,11 +124,9 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 
 	// Load tag statistics to guide AI tag selection
 	var tagStats *models.TagStatistics
-	if a.tagStatsRepo != nil {
-		stats, err := a.tagStatsRepo.GetByUserID(ctx, job.UserID)
-		if err == nil && stats != nil {
-			tagStats = stats
-		}
+	stats, err := a.getTagStatistics(ctx, job.UserID)
+	if err == nil && stats != nil {
+		tagStats = stats
 	}
 
 	// Check if user has reprocessing paused
@@ -204,13 +259,11 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 			// If parsing fails, fall back to CreatedAt
 		}
 
-		// Load tag statistics for this user (reuse from earlier in the function)
+		// Load tag statistics for this user (reuse from cache)
 		var tagStats *models.TagStatistics
-		if a.tagStatsRepo != nil {
-			stats, err := a.tagStatsRepo.GetByUserID(ctx, job.UserID)
-			if err == nil && stats != nil {
-				tagStats = stats
-			}
+		stats, err := a.getTagStatistics(ctx, job.UserID)
+		if err == nil && stats != nil {
+			tagStats = stats
 		}
 
 		// Analyze task (with due date if available)
