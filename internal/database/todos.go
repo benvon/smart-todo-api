@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 const (
@@ -22,9 +22,9 @@ type TagChangeHandler func(ctx context.Context, userID uuid.UUID) error
 
 // TodoRepository handles todo database operations
 type TodoRepository struct {
-	db                *DB
-	tagStatsRepo      TagStatisticsRepositoryInterface // Optional: for automatic tag change detection
-	tagChangeHandler  TagChangeHandler                 // Optional: callback when tags change
+	db               *DB
+	tagStatsRepo     TagStatisticsRepositoryInterface // Optional: for automatic tag change detection
+	tagChangeHandler TagChangeHandler                 // Optional: callback when tags change
 }
 
 // NewTodoRepository creates a new todo repository
@@ -49,17 +49,17 @@ func (r *TodoRepository) Create(ctx context.Context, todo *models.Todo) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING created_at, updated_at
 	`
-	
+
 	metadataJSON, err := json.Marshal(todo.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
-	
+
 	var dueDate sql.NullTime
 	if todo.DueDate != nil {
 		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		todo.ID,
@@ -72,11 +72,11 @@ func (r *TodoRepository) Create(ctx context.Context, todo *models.Todo) error {
 		now,
 		now,
 	).Scan(&todo.CreatedAt, &todo.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to create todo: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -86,13 +86,13 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 	var metadataJSON []byte
 	var completedAt sql.NullTime
 	var dueDate sql.NullTime
-	
+
 	query := `
 		SELECT id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at, completed_at
 		FROM todos
 		WHERE id = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&todo.ID,
 		&todo.UserID,
@@ -105,31 +105,31 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 		&todo.UpdatedAt,
 		&completedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("todo not found: %w", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get todo: %w", err)
 	}
-	
+
 	if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
-	
+
 	// Initialize TagSources if nil
 	if todo.Metadata.TagSources == nil {
 		todo.Metadata.TagSources = make(map[string]models.TagSource)
 	}
-	
+
 	if dueDate.Valid {
 		todo.DueDate = &dueDate.Time
 	}
-	
+
 	if completedAt.Valid {
 		todo.CompletedAt = &completedAt.Time
 	}
-	
+
 	return todo, nil
 }
 
@@ -222,7 +222,7 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 		if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
 			return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
-		
+
 		// Initialize TagSources if nil
 		if todo.Metadata.TagSources == nil {
 			todo.Metadata.TagSources = make(map[string]models.TagSource)
@@ -288,22 +288,22 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 		WHERE id = $1
 		RETURNING updated_at
 	`
-	
+
 	metadataJSON, err := json.Marshal(todo.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
-	
+
 	var dueDate sql.NullTime
 	if todo.DueDate != nil {
 		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
 	}
-	
+
 	var completedAt sql.NullTime
 	if todo.CompletedAt != nil {
 		completedAt = sql.NullTime{Time: *todo.CompletedAt, Valid: true}
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		todo.ID,
@@ -315,7 +315,7 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 		now,
 		completedAt,
 	).Scan(&todo.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("todo not found")
 	}
@@ -336,7 +336,7 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 	} else if tagsChanged && r.tagChangeHandler == nil {
 		log.Printf("Tags changed for todo %s but no tag change handler configured", todo.ID)
 	}
-	
+
 	return nil
 }
 
@@ -350,58 +350,70 @@ func tagsEqual(a, b []string) bool {
 	if b == nil {
 		b = []string{}
 	}
-	
+
 	if len(a) != len(b) {
 		return false
 	}
-	
+
 	// Both empty - equal
 	if len(a) == 0 {
 		return true
 	}
-	
+
 	// Create maps for O(n) comparison
 	mapA := make(map[string]int)
 	mapB := make(map[string]int)
-	
+
+	// Track seen tags to detect and warn about duplicates
+	seenA := make(map[string]struct{})
 	for _, tag := range a {
+		if _, exists := seenA[tag]; exists {
+			log.Printf("tagsEqual: duplicate tag %q detected in first tag slice", tag)
+		} else {
+			seenA[tag] = struct{}{}
+		}
 		mapA[tag]++
 	}
+
+	seenB := make(map[string]struct{})
 	for _, tag := range b {
+		if _, exists := seenB[tag]; exists {
+			log.Printf("tagsEqual: duplicate tag %q detected in second tag slice", tag)
+		} else {
+			seenB[tag] = struct{}{}
+		}
 		mapB[tag]++
 	}
-	
+
 	if len(mapA) != len(mapB) {
 		return false
 	}
-	
+
 	for tag, count := range mapA {
 		if mapB[tag] != count {
 			return false
 		}
 	}
-	
 	return true
 }
-
 
 // Delete deletes a todo by ID
 func (r *TodoRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM todos WHERE id = $1`
-	
+
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete todo: %w", err)
 	}
-	
+
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
-	
+
 	if rowsAffected == 0 {
 		return fmt.Errorf("todo not found")
 	}
-	
+
 	return nil
 }
