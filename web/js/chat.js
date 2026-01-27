@@ -54,8 +54,23 @@ function initChat() {
 async function loadContext() {
     try {
         const response = await getAIContext();
-        if (response.data && response.data.context_summary) {
-            currentContext = response.data.context_summary;
+        // Validate response structure and data types
+        if (response && typeof response === 'object' && 
+            response.data && typeof response.data === 'object') {
+            // Ensure context_summary is a string before updating currentContext
+            const contextSummary = response.data.context_summary;
+            if (typeof contextSummary === 'string') {
+                currentContext = contextSummary;
+            } else if (contextSummary === null || contextSummary === undefined) {
+                // API returned null/undefined - treat as empty context
+                currentContext = '';
+            } else {
+                // Unexpected type - log warning and preserve current context
+                logger.warn('Unexpected context_summary type:', typeof contextSummary);
+            }
+        } else {
+            // Invalid response structure - clear context
+            currentContext = '';
         }
     } catch (error) {
         logger.error('Failed to load context:', error);
@@ -73,11 +88,25 @@ async function handleLoadContext() {
     
     try {
         const response = await getAIContext();
-        if (response.data && response.data.context_summary) {
-            currentContext = response.data.context_summary;
-            chatInput.value = currentContext;
-            chatInput.focus();
+        // Validate response structure and data types
+        if (response && typeof response === 'object' && 
+            response.data && typeof response.data === 'object') {
+            const contextSummary = response.data.context_summary;
+            if (typeof contextSummary === 'string') {
+                currentContext = contextSummary;
+                chatInput.value = currentContext;
+                chatInput.focus();
+            } else if (contextSummary === null || contextSummary === undefined) {
+                // API returned null/undefined - treat as empty context
+                currentContext = '';
+                chatInput.value = '';
+            } else {
+                // Unexpected type - log warning, preserve current context, and clear input
+                logger.warn('Unexpected context_summary type:', typeof contextSummary);
+                chatInput.value = '';
+            }
         } else {
+            // Invalid response structure - clear input
             chatInput.value = '';
         }
     } catch (error) {
