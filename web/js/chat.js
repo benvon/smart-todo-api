@@ -54,8 +54,20 @@ function initChat() {
 async function loadContext() {
     try {
         const response = await getAIContext();
-        if (response.data && response.data.context_summary) {
-            currentContext = response.data.context_summary;
+        // Validate response structure and data types
+        if (response && typeof response === 'object' && 
+            response.data && typeof response.data === 'object') {
+            // Ensure context_summary is a string (or null/undefined)
+            const contextSummary = response.data.context_summary;
+            if (typeof contextSummary === 'string') {
+                currentContext = contextSummary;
+            } else if (contextSummary === null || contextSummary === undefined) {
+                // Explicitly handle null/undefined - keep currentContext as empty string
+                currentContext = '';
+            } else {
+                // Unexpected type - log warning and keep current context
+                logger.warn('Unexpected context_summary type:', typeof contextSummary);
+            }
         }
     } catch (error) {
         logger.error('Failed to load context:', error);

@@ -76,3 +76,7 @@ local/
 # Binary executables
 server
 worker
+
+# Node.js
+node_modules/
+web/node_modules/
