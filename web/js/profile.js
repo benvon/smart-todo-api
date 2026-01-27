@@ -66,26 +66,38 @@ export function initProfile() {
  * Load profile data (user info, context, tag stats)
  */
 async function loadProfileData() {
-    try {
-        // Load user info
-        const userResponse = await getCurrentUser();
-        if (userResponse.data) {
-            const user = userResponse.data;
-            const userNameEl = document.getElementById('user-name');
-            const userEmailEl = document.getElementById('user-email');
-            if (userNameEl) {
-                userNameEl.textContent = user.name || 'Not provided';
-            }
-            if (userEmailEl) {
-                userEmailEl.textContent = user.email || 'Not provided';
-            }
-        }
+    // Load all data in parallel using Promise.allSettled
+    const results = await Promise.allSettled([
+        getCurrentUser(),
+        getAIContext(),
+        loadTagStats()
+    ]);
 
-        // Load AI context
-        const contextResponse = await getAIContext();
+    // Handle user info result
+    const [userResult, contextResult, tagStatsResult] = results;
+    
+    if (userResult.status === 'fulfilled' && userResult.value.data) {
+        const user = userResult.value.data;
+        const userNameEl = document.getElementById('user-name');
+        const userEmailEl = document.getElementById('user-email');
+        if (userNameEl) {
+            userNameEl.textContent = user.name || 'Not provided';
+        }
+        if (userEmailEl) {
+            userEmailEl.textContent = user.email || 'Not provided';
+        }
+    } else if (userResult.status === 'rejected') {
+        logger.error('Failed to load user data:', userResult.reason);
+        if (!userResult.reason?.isAuthError) {
+            showError(userResult.reason?.message || 'Failed to load user data');
+        }
+    }
+
+    // Handle AI context result
+    if (contextResult.status === 'fulfilled') {
         // Handle context_summary - it can be null, undefined, or empty string
-        if (contextResponse && contextResponse.data) {
-            currentContext = contextResponse.data.context_summary || '';
+        if (contextResult.value && contextResult.value.data) {
+            currentContext = contextResult.value.data.context_summary || '';
         } else {
             currentContext = '';
         }
@@ -93,14 +105,16 @@ async function loadProfileData() {
         if (contextTextarea) {
             contextTextarea.value = currentContext;
         }
-
-        // Load tag statistics
-        await loadTagStats();
-    } catch (error) {
-        logger.error('Failed to load profile data:', error);
-        if (!error.isAuthError) {
-            showError(error.message || 'Failed to load profile data');
+    } else if (contextResult.status === 'rejected') {
+        logger.error('Failed to load AI context:', contextResult.reason);
+        if (!contextResult.reason?.isAuthError) {
+            showError(contextResult.reason?.message || 'Failed to load AI context');
         }
+    }
+
+    // Tag stats are handled in loadTagStats, which already has its own error handling
+    if (tagStatsResult.status === 'rejected') {
+        logger.error('Failed to load tag stats:', tagStatsResult.reason);
     }
 }
 
