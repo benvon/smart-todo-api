@@ -1136,11 +1136,14 @@ async function saveTodoEdit(id, text, tags, dueDateText, todoEl) {
         try {
             await analyzeTodo(id);
         } catch (error) {
-            logger.error('Failed to trigger reprocessing:', error);
-            // Roll back optimistic update if analyze fails
-            if (todo && originalStatus !== null) {
-                todo.status = originalStatus;
-                renderTodos();
+            // Don't log or update UI for auth errors (we're redirecting to login)
+            if (!error.isAuthError) {
+                logger.error('Failed to trigger reprocessing:', error);
+                // Roll back optimistic update if analyze fails
+                if (todo) {
+                    todo.status = originalStatus;
+                    renderTodos();
+                }
             }
             // Don't fail the save if reprocessing fails
         }
