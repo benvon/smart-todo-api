@@ -8,6 +8,8 @@ On every version tag push (`v*.*.*` or `v*.*.*-rc*`), the release-web workflow:
 2. Deploys the built site to Cloudflare Pages with production config injected from secrets
 3. Creates a GitHub Release and attaches the tarball
 
+Deployments target the **production** environment by passing `branch: main`. Ensure your Pages project’s production branch in Cloudflare (Workers & Pages → your project → Settings) is set to `main`, or adjust the workflow’s `branch` input to match.
+
 The release tarball is intentionally built **without** `config.json`; config is deployment-specific and is supplied at deploy time (e.g. from GitHub Actions secrets for Cloudflare Pages, or manually for other hosts).
 
 ### Required GitHub Actions secrets
@@ -22,6 +24,8 @@ For the automated Cloudflare Pages deployment to succeed, configure these reposi
 | `CLOUDFLARE_PAGES_PROJECT_NAME` | Name of the **Pages** project (not a Worker). See troubleshooting if you only have a Worker. |
 
 The project name is the **exact** name of a **Cloudflare Pages** project shown in the dashboard (Workers & Pages → your **Pages** project). It is case-sensitive and must match what Cloudflare shows—not a GUID. If you see "Project not found" (API error 8000007), the project name or account ID is wrong for the account the token uses.
+
+The workflow uses `cloudflare/pages-action@v1.5.0` (that action’s latest release). The pages-action repo is archived; Cloudflare recommends [wrangler-action](https://github.com/cloudflare/wrangler-action) for new workflows. We use Wrangler v3 via the action’s `wranglerVersion` input to avoid deprecated dependency warnings.
 
 See [Frontend Deployment](../README.md#frontend-deployment) in the main README for manual build and deployment steps (including other hosts and `config.json` setup).
 

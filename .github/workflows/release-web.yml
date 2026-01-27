@@ -70,6 +70,7 @@ jobs:
           tar -xzf "${{ steps.package.outputs.package_path }}" -C deploy --strip-components=1
           node -e "require('fs').writeFileSync('deploy/config.json', JSON.stringify({api_base_url: process.env.WEB_API_BASE_URL}))"
 
+      # cloudflare/pages-action@v1.5.0 is the latest release; repo is archived, Cloudflare recommends wrangler-action for new use.
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1.5.0
         with:
@@ -78,6 +79,8 @@ jobs:
           projectName: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
           directory: deploy
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          wranglerVersion: "3"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
