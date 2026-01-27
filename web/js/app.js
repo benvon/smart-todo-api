@@ -884,6 +884,9 @@ async function handleEditDueDate(id, element, currentDueDate) {
  * 
  * For more complex structures (e.g., objects with Date, Map, Set, or class instances),
  * the native structuredClone is preferred when available.
+ * 
+ * @param {*} obj - The value to clone (can be any type)
+ * @returns {*} A deep clone of the input value
  */
 function deepClone(obj) {
     // Use native structuredClone if available (modern browsers)
