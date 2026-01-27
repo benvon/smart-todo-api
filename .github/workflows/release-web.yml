@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
   packages: write
+  deployments: write   # needed for cloudflare/pages-action to create GitHub Deployment records
 
 jobs:
   release:
