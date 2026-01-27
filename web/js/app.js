@@ -464,7 +464,8 @@ function renderTodos() {
     editModeTodos.forEach(el => {
         const todoId = el.getAttribute('data-todo-id');
         if (todoId) {
-            editModeElements.set(todoId, el);
+            // Store with string key to match the lookup below
+            editModeElements.set(String(todoId), el);
         }
     });
     
@@ -501,8 +502,8 @@ function renderTodoList(container, todoList, timeHorizon, editModeElements) {
     
     todoList.forEach(todo => {
         // If this todo is in edit mode, re-use the existing element to preserve edit state
-        if (editModeElements && editModeElements.has(todo.id)) {
-            const existingEl = editModeElements.get(todo.id);
+        if (editModeElements && editModeElements.has(String(todo.id))) {
+            const existingEl = editModeElements.get(String(todo.id));
             container.appendChild(existingEl);
             return;
         }
