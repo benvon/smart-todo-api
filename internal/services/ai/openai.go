@@ -29,8 +29,13 @@ const (
 	DefaultMaxTagsInPrompt = 50
 	// DefaultMaxTagTokens is the default maximum number of tokens for the tag list (roughly 30% of typical context)
 	DefaultMaxTagTokens = 500
-	// MinFrequentlyUsedTags is the minimum number of frequently used tags to always include
-	MinFrequentlyUsedTags = 20
+
+	// TagScoreFrequencyWeight is the weight given to tag frequency in the scoring algorithm
+	TagScoreFrequencyWeight = 0.7
+	// TagScoreSimilarityWeight is the weight given to semantic similarity in the scoring algorithm
+	TagScoreSimilarityWeight = 0.3
+	// TagScoreSimilarityMultiplier scales similarity scores to be comparable with frequency scores
+	TagScoreSimilarityMultiplier = 100
 
 	// ErrNoChoicesInResponse is returned when the API response has no choices
 	ErrNoChoicesInResponse = "no choices in response"
@@ -278,6 +283,10 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 // This uses a simple heuristic: ~4 characters per token (common for English text)
 // For more accurate counting, consider using a tokenizer library
 func estimateTokenCount(text string) int {
+	// Handle empty text explicitly
+	if len(text) == 0 {
+		return 0
+	}
 	return len(text) / 4
 }
 
@@ -346,9 +355,9 @@ func (p *OpenAIProvider) selectTagsForPrompt(tagStats map[string]models.TagStats
 		// Calculate similarity between tag and todo text
 		similarity := calculateStringSimilarity(tag, todoText)
 
-		// Combined score: frequency (70%) + similarity (30%)
-		// Normalize frequency by max count for fair comparison
-		score := float64(stats.Total)*0.7 + similarity*100*0.3
+		// Combined score: frequency weight + similarity weight
+		// Similarity is multiplied to make it comparable with frequency scores
+		score := float64(stats.Total)*TagScoreFrequencyWeight + similarity*TagScoreSimilarityMultiplier*TagScoreSimilarityWeight
 
 		tagList = append(tagList, tagScore{
 			tag:        tag,

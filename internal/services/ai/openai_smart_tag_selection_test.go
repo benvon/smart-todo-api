@@ -179,16 +179,19 @@ func TestCalculateStringSimilarity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		s1       string
-		s2       string
-		minScore float64 // Minimum expected score
+		name         string
+		s1           string
+		s2           string
+		minScore     float64 // Minimum expected score
+		exactScore   float64 // Exact expected score (0 means use minScore)
+		checkExact   bool    // Whether to check for exact score
 	}{
 		{
-			name:     "identical strings",
-			s1:       "shopping",
-			s2:       "shopping",
-			minScore: 0.9, // Should be very high
+			name:       "identical strings",
+			s1:         "shopping",
+			s2:         "shopping",
+			exactScore: 1.0,
+			checkExact: true,
 		},
 		{
 			name:     "similar strings",
@@ -216,7 +219,11 @@ func TestCalculateStringSimilarity(t *testing.T) {
 			if result < 0 || result > 1 {
 				t.Errorf("calculateStringSimilarity(%q, %q) = %f, expected value between 0 and 1", tt.s1, tt.s2, result)
 			}
-			if result < tt.minScore {
+			if tt.checkExact {
+				if result != tt.exactScore {
+					t.Errorf("calculateStringSimilarity(%q, %q) = %f, expected exactly %f", tt.s1, tt.s2, result, tt.exactScore)
+				}
+			} else if result < tt.minScore {
 				t.Errorf("calculateStringSimilarity(%q, %q) = %f, expected at least %f", tt.s1, tt.s2, result, tt.minScore)
 			}
 		})
