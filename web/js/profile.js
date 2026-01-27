@@ -4,6 +4,7 @@ import { getCurrentUser, getAIContext, updateAIContext, getTagStats } from './ap
 import { logout } from './auth.js';
 import logger from './logger.js';
 import { showError } from './error-utils.js';
+import { escapeHtml } from './html-utils.js';
 
 let currentContext = '';
 
@@ -249,13 +250,5 @@ export function getCurrentContextText() {
     return currentContext;
 }
 
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
 
 
