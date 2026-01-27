@@ -131,13 +131,8 @@ async function appendToContext(text) {
         ? `${currentContext}\n\n${text}`
         : text;
     
-    try {
-        await updateAIContext(newContext);
-        currentContext = newContext;
-    } catch (error) {
-        logger.error('Failed to append to context:', error);
-        // Don't show error to user, just log it
-    }
+    await updateAIContext(newContext);
+    currentContext = newContext;
 }
 
 /**
@@ -214,13 +209,24 @@ function addChatMessage(role, content) {
         appendBtn.style.marginTop = '8px';
         appendBtn.style.fontSize = '11px';
         appendBtn.addEventListener('click', async () => {
-            await appendToContext(content);
-            appendBtn.textContent = 'Appended!';
-            appendBtn.disabled = true;
-            setTimeout(() => {
-                appendBtn.textContent = 'Append to Context';
-                appendBtn.disabled = false;
-            }, 2000);
+            const originalText = appendBtn.textContent;
+            try {
+                await appendToContext(content);
+                appendBtn.textContent = 'Appended!';
+                appendBtn.disabled = true;
+                setTimeout(() => {
+                    appendBtn.textContent = originalText;
+                    appendBtn.disabled = false;
+                }, 2000);
+            } catch (error) {
+                logger.error('Failed to append to context:', error);
+                appendBtn.textContent = 'Failed';
+                appendBtn.classList.add('btn-danger');
+                setTimeout(() => {
+                    appendBtn.textContent = originalText;
+                    appendBtn.classList.remove('btn-danger');
+                }, 2000);
+            }
         });
         messageDiv.appendChild(appendBtn);
     }
