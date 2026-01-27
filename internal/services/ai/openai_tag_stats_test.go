@@ -88,7 +88,7 @@ func TestBuildAnalysisPrompt_IncludesTagStatistics(t *testing.T) {
 	}
 
 	tagListSection := prompt[tagListStart:]
-	
+
 	// Find positions relative to tag list section
 	workPos := strings.Index(tagListSection, "work")
 	shoppingPos := strings.Index(tagListSection, "shopping")

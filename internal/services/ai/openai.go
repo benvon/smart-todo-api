@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/models"
@@ -24,14 +25,23 @@ const (
 	// DefaultTimeout is the default timeout for API calls
 	DefaultTimeout = 30 * time.Second
 
+	// DefaultMaxTagsInPrompt is the default maximum number of tags to include in the prompt
+	DefaultMaxTagsInPrompt = 50
+	// DefaultMaxTagTokens is the default maximum number of tokens for the tag list (roughly 30% of typical context)
+	DefaultMaxTagTokens = 500
+	// MinFrequentlyUsedTags is the minimum number of frequently used tags to always include
+	MinFrequentlyUsedTags = 20
+
 	// ErrNoChoicesInResponse is returned when the API response has no choices
 	ErrNoChoicesInResponse = "no choices in response"
 )
 
 // OpenAIProvider implements the AIProvider interface using OpenAI's API
 type OpenAIProvider struct {
-	client openai.Client
-	model  string
+	client          openai.Client
+	model           string
+	maxTagsInPrompt int
+	maxTagTokens    int
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
@@ -51,8 +61,10 @@ func NewOpenAIProvider(apiKey string, model string) *OpenAIProvider {
 	)
 
 	return &OpenAIProvider{
-		client: client,
-		model:  model,
+		client:          client,
+		model:           model,
+		maxTagsInPrompt: DefaultMaxTagsInPrompt,
+		maxTagTokens:    DefaultMaxTagTokens,
 	}
 }
 
@@ -76,8 +88,10 @@ func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *O
 	)
 
 	return &OpenAIProvider{
-		client: client,
-		model:  model,
+		client:          client,
+		model:           model,
+		maxTagsInPrompt: DefaultMaxTagsInPrompt,
+		maxTagTokens:    DefaultMaxTagTokens,
 	}
 }
 
@@ -260,6 +274,121 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 	return content, nil
 }
 
+// estimateTokenCount provides a rough estimate of token count for a string
+// This uses a simple heuristic: ~4 characters per token (common for English text)
+// For more accurate counting, consider using a tokenizer library
+func estimateTokenCount(text string) int {
+	return len(text) / 4
+}
+
+// calculateStringSimilarity calculates a simple similarity score between two strings
+// Returns a score between 0 and 1, where 1 means identical
+// This uses a basic approach: counts common words (case-insensitive)
+func calculateStringSimilarity(s1, s2 string) float64 {
+	// Convert to lowercase and split into words
+	words1 := strings.Fields(strings.ToLower(s1))
+	words2 := strings.Fields(strings.ToLower(s2))
+
+	if len(words1) == 0 || len(words2) == 0 {
+		return 0.0
+	}
+
+	// Create a set of words from s2 for faster lookup
+	word2Set := make(map[string]bool)
+	for _, word := range words2 {
+		word2Set[word] = true
+	}
+
+	// Count common words
+	commonCount := 0
+	for _, word := range words1 {
+		if word2Set[word] {
+			commonCount++
+		}
+	}
+
+	// Use Jaccard similarity: intersection / union
+	union := len(words1) + len(words2) - commonCount
+	if union == 0 {
+		return 0.0
+	}
+
+	return float64(commonCount) / float64(union)
+}
+
+// selectTagsForPrompt selects tags to include in the prompt using a smart algorithm
+// It combines frequently used tags with tags semantically similar to the todo text
+func (p *OpenAIProvider) selectTagsForPrompt(tagStats map[string]models.TagStats, todoText string) []string {
+	if len(tagStats) == 0 {
+		return nil
+	}
+
+	// Use defaults if not configured
+	maxTags := p.maxTagsInPrompt
+	if maxTags == 0 {
+		maxTags = DefaultMaxTagsInPrompt
+	}
+	maxTokens := p.maxTagTokens
+	if maxTokens == 0 {
+		maxTokens = DefaultMaxTagTokens
+	}
+
+	// Create tag list with scores
+	type tagScore struct {
+		tag        string
+		total      int
+		similarity float64
+		score      float64
+	}
+
+	tagList := make([]tagScore, 0, len(tagStats))
+	for tag, stats := range tagStats {
+		// Calculate similarity between tag and todo text
+		similarity := calculateStringSimilarity(tag, todoText)
+
+		// Combined score: frequency (70%) + similarity (30%)
+		// Normalize frequency by max count for fair comparison
+		score := float64(stats.Total)*0.7 + similarity*100*0.3
+
+		tagList = append(tagList, tagScore{
+			tag:        tag,
+			total:      stats.Total,
+			similarity: similarity,
+			score:      score,
+		})
+	}
+
+	// Sort by combined score (descending)
+	sort.Slice(tagList, func(i, j int) bool {
+		return tagList[i].score > tagList[j].score
+	})
+
+	// Select tags up to limits
+	selectedTags := make([]string, 0, maxTags)
+	estimatedTokens := 0
+
+	for _, entry := range tagList {
+		// Build tag entry text to estimate its token count
+		tagText := fmt.Sprintf("- %s (used %d times)\n", entry.tag, entry.total)
+		entryTokens := estimateTokenCount(tagText)
+
+		// Check if adding this tag would exceed token limit
+		if estimatedTokens+entryTokens > maxTokens {
+			break
+		}
+
+		// Check if we've reached max tags limit
+		if len(selectedTags) >= maxTags {
+			break
+		}
+
+		selectedTags = append(selectedTags, entry.tag)
+		estimatedTokens += entryTokens
+	}
+
+	return selectedTags
+}
+
 // buildAnalysisPrompt builds the prompt for task analysis with time context and tag statistics
 func (p *OpenAIProvider) buildAnalysisPrompt(text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) string {
 	now := time.Now()
@@ -337,37 +466,19 @@ Return only valid JSON.`
 	// Include tag statistics to guide tag selection
 	if tagStats != nil && len(tagStats.TagStats) > 0 {
 		prompt += "\n\nExisting tags (prefer reusing these when semantically similar):"
-		
-		// Sort tags by total count (most used first) for better guidance
-		type tagEntry struct {
-			tag   string
-			total int
-		}
-		tagList := make([]tagEntry, 0, len(tagStats.TagStats))
-		for tag, stats := range tagStats.TagStats {
-			tagList = append(tagList, tagEntry{tag: tag, total: stats.Total})
-		}
-		
-		// Sort by total count (descending)
-		sort.Slice(tagList, func(i, j int) bool {
-			return tagList[i].total > tagList[j].total
-		})
-		
-		// Format tag list (limit to top 50 to avoid prompt bloat)
-		maxTags := 50
-		if len(tagList) > maxTags {
-			tagList = tagList[:maxTags]
-		}
-		
-		for _, entry := range tagList {
-			stats := tagStats.TagStats[entry.tag]
-			prompt += fmt.Sprintf("\n- %s (used %d times", entry.tag, stats.Total)
+
+		// Use smart tag selection algorithm
+		selectedTags := p.selectTagsForPrompt(tagStats.TagStats, text)
+
+		for _, tag := range selectedTags {
+			stats := tagStats.TagStats[tag]
+			prompt += fmt.Sprintf("\n- %s (used %d times", tag, stats.Total)
 			if stats.AI > 0 || stats.User > 0 {
 				prompt += fmt.Sprintf(", %d AI-generated, %d user-defined", stats.AI, stats.User)
 			}
 			prompt += ")"
 		}
-		
+
 		prompt += "\n\nTag selection guidance:"
 		prompt += "\n- Prefer reusing existing tags when they are semantically similar or closely related to the todo item"
 		prompt += "\n- Only create new tags if no existing tag is a good match (consider synonyms, related concepts, and variations)"

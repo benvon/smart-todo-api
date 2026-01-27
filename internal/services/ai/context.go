@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 // ContextService manages AI context for users
 type ContextService struct {
-	provider  AIProvider
+	provider    AIProvider
 	contextRepo *database.AIContextRepository
 }
 
@@ -29,17 +29,17 @@ func (s *ContextService) GetOrCreateContext(ctx context.Context, userID uuid.UUI
 	if err == nil {
 		return aiContext, nil
 	}
-	
+
 	// Create new context if not found
 	aiContext = &models.AIContext{
 		UserID:      userID,
 		Preferences: make(map[string]any),
 	}
-	
+
 	if err := s.contextRepo.Create(ctx, aiContext); err != nil {
 		return nil, fmt.Errorf("failed to create AI context: %w", err)
 	}
-	
+
 	return aiContext, nil
 }
 
@@ -50,21 +50,21 @@ func (s *ContextService) UpdateContextSummary(ctx context.Context, userID uuid.U
 	if err != nil {
 		return fmt.Errorf("failed to summarize context: %w", err)
 	}
-	
+
 	// Get or create context
 	aiContext, err := s.GetOrCreateContext(ctx, userID)
 	if err != nil {
 		return err
 	}
-	
+
 	// Update summary
 	aiContext.ContextSummary = summary
-	
+
 	// Update in database
 	if err := s.contextRepo.Update(ctx, aiContext); err != nil {
 		return fmt.Errorf("failed to update context: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -74,19 +74,19 @@ func (s *ContextService) MergeContextSummary(ctx context.Context, userID uuid.UU
 	if err != nil {
 		return err
 	}
-	
+
 	// Simple merge: append new summary to existing
 	if aiContext.ContextSummary != "" {
 		aiContext.ContextSummary = aiContext.ContextSummary + "\n\n" + newSummary
 	} else {
 		aiContext.ContextSummary = newSummary
 	}
-	
+
 	// Update in database
 	if err := s.contextRepo.Update(ctx, aiContext); err != nil {
 		return fmt.Errorf("failed to update context: %w", err)
 	}
-	
+
 	return nil
 }
 
