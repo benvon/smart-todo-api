@@ -16,35 +16,35 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 		{
 			name:     "empty metadata",
 			metadata: Metadata{},
-			jsonStr:  `{}`,
+			jsonStr:  `{"time_horizon_user_override":null}`,
 		},
 		{
 			name: "with category tags",
 			metadata: Metadata{
 				CategoryTags: []string{"work", "urgent"},
 			},
-			jsonStr: `{"category_tags":["work","urgent"]}`,
+			jsonStr: `{"category_tags":["work","urgent"],"time_horizon_user_override":null}`,
 		},
 		{
 			name: "with priority",
 			metadata: Metadata{
 				Priority: stringPtr("high"),
 			},
-			jsonStr: `{"priority":"high"}`,
+			jsonStr: `{"priority":"high","time_horizon_user_override":null}`,
 		},
 		{
 			name: "with context",
 			metadata: Metadata{
 				Context: []string{"home", "evening"},
 			},
-			jsonStr: `{"context":["home","evening"]}`,
+			jsonStr: `{"context":["home","evening"],"time_horizon_user_override":null}`,
 		},
 		{
 			name: "with duration",
 			metadata: Metadata{
 				Duration: stringPtr("30m"),
 			},
-			jsonStr: `{"duration":"30m"}`,
+			jsonStr: `{"duration":"30m","time_horizon_user_override":null}`,
 		},
 		{
 			name: "all fields",
@@ -54,14 +54,14 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 				Context:      []string{"office"},
 				Duration:     stringPtr("1h"),
 			},
-			jsonStr: `{"category_tags":["work"],"priority":"medium","context":["office"],"duration":"1h"}`,
+			jsonStr: `{"category_tags":["work"],"priority":"medium","context":["office"],"duration":"1h","time_horizon_user_override":null}`,
 		},
 		{
 			name: "with time_entered",
 			metadata: Metadata{
 				TimeEntered: stringPtr("2024-03-15T14:30:00Z"),
 			},
-			jsonStr: `{"time_entered":"2024-03-15T14:30:00Z"}`,
+			jsonStr: `{"time_entered":"2024-03-15T14:30:00Z","time_horizon_user_override":null}`,
 		},
 		{
 			name: "all fields including time_entered",
@@ -72,14 +72,21 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 				Duration:     stringPtr("30m"),
 				TimeEntered:  stringPtr("2024-03-15T14:30:00Z"),
 			},
-			jsonStr: `{"category_tags":["work"],"priority":"high","context":["home"],"duration":"30m","time_entered":"2024-03-15T14:30:00Z"}`,
+			jsonStr: `{"category_tags":["work"],"priority":"high","context":["home"],"duration":"30m","time_entered":"2024-03-15T14:30:00Z","time_horizon_user_override":null}`,
 		},
 		{
-			name: "with time_horizon_user_override",
+			name: "with time_horizon_user_override true",
 			metadata: Metadata{
 				TimeHorizonUserOverride: boolPtr(true),
 			},
 			jsonStr: `{"time_horizon_user_override":true}`,
+		},
+		{
+			name: "with time_horizon_user_override false",
+			metadata: Metadata{
+				TimeHorizonUserOverride: boolPtr(false),
+			},
+			jsonStr: `{"time_horizon_user_override":false}`,
 		},
 		{
 			name: "all fields including time_horizon_user_override",
