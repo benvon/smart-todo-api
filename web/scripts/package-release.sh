@@ -20,7 +20,8 @@ cd "$(dirname "$0")/.."
 npm ci
 npm run build
 
-# Copy built files
+# Copy built files (config.json is intentionally excluded—it is deployment-specific
+# and must be supplied at deploy time, not bundled in the release tarball)
 echo "Copying files to package directory..."
 cp -r dist "${PACKAGE_DIR}/"
 cp index.html "${PACKAGE_DIR}/"
@@ -57,6 +58,8 @@ This package contains the built frontend for Smart Todo API.
 3. Set the build output directory to the root of the extracted package
 4. Configure environment variables as needed
 
+For automated deployment from CI, see the main project’s docs/DEPLOYING_FRONTEND.md.
+
 ### Nginx Deployment
 
 1. Extract this package to your web server directory
@@ -77,6 +80,9 @@ Create this file in the root of the deployment directory:
 
 For more information, see the main project README.
 EOF
+
+# Ensure config.json is not in the package (guard against future accidental inclusion)
+rm -f "${PACKAGE_DIR}/config.json"
 
 # Create tarball
 echo "Creating tarball..."
