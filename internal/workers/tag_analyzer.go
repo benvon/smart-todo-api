@@ -56,7 +56,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	pageSize := 500
 	
 	for {
-		todos, total, err := a.todoRepo.GetByUserIDPaginated(ctx, job.UserID, nil, nil, page, pageSize)
+		todos, _, err := a.todoRepo.GetByUserIDPaginated(ctx, job.UserID, nil, nil, page, pageSize)
 		if err != nil {
 			return fmt.Errorf("failed to get todos: %w", err)
 		}
@@ -65,8 +65,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 		
 		// Check if we've loaded all todos
 		// If this page returned fewer todos than pageSize, we're done
-		// Or if we've loaded all todos according to total count
-		if len(todos) < pageSize || len(allTodos) >= total {
+		if len(todos) < pageSize {
 			break
 		}
 		
