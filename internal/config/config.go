@@ -8,37 +8,41 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	DatabaseURL      string
-	ServerPort       string
-	BaseURL          string
-	FrontendURL      string
-	OpenAIKey        string
-	AIProvider       string
-	AIModel          string
-	AIBaseURL        string
-	EnableHSTS       bool
-	OIDCProvider     string
-	RedisURL         string
-	RabbitMQURL      string
-	RabbitMQPrefetch int
+	DatabaseURL         string
+	ServerPort          string
+	BaseURL             string
+	FrontendURL         string
+	OpenAIKey           string
+	AIProvider          string
+	AIModel             string
+	AIBaseURL           string
+	AIMaxPromptTags     int
+	AITagsTokenPercent  int
+	EnableHSTS          bool
+	OIDCProvider        string
+	RedisURL            string
+	RabbitMQURL         string
+	RabbitMQPrefetch    int
 }
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:      getEnv("DATABASE_URL", ""),
-		ServerPort:       getEnv("SERVER_PORT", "8080"),
-		BaseURL:          getEnv("BASE_URL", "http://localhost:8080"),
-		FrontendURL:      getEnv("FRONTEND_URL", "http://localhost:3000"),
-		OpenAIKey:        getEnv("OPENAI_API_KEY", ""),
-		AIProvider:       getEnv("AI_PROVIDER", "openai"),
-		AIModel:          getEnv("AI_MODEL", ""),
-		AIBaseURL:        getEnv("AI_BASE_URL", ""),
-		EnableHSTS:       getEnvBool("ENABLE_HSTS", false),
-		OIDCProvider:     getEnv("OIDC_PROVIDER", "cognito"),
-		RedisURL:         getEnv("REDIS_URL", "redis://localhost:6379/0"),
-		RabbitMQURL:      getEnv("RABBITMQ_URL", ""),
-		RabbitMQPrefetch: getEnvInt("RABBITMQ_PREFETCH", 1),
+		DatabaseURL:        getEnv("DATABASE_URL", ""),
+		ServerPort:         getEnv("SERVER_PORT", "8080"),
+		BaseURL:            getEnv("BASE_URL", "http://localhost:8080"),
+		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:3000"),
+		OpenAIKey:          getEnv("OPENAI_API_KEY", ""),
+		AIProvider:         getEnv("AI_PROVIDER", "openai"),
+		AIModel:            getEnv("AI_MODEL", ""),
+		AIBaseURL:          getEnv("AI_BASE_URL", ""),
+		AIMaxPromptTags:    getEnvInt("AI_MAX_PROMPT_TAGS", 30),
+		AITagsTokenPercent: getEnvInt("AI_TAGS_TOKEN_PERCENT", 20),
+		EnableHSTS:         getEnvBool("ENABLE_HSTS", false),
+		OIDCProvider:       getEnv("OIDC_PROVIDER", "cognito"),
+		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		RabbitMQURL:        getEnv("RABBITMQ_URL", ""),
+		RabbitMQPrefetch:   getEnvInt("RABBITMQ_PREFETCH", 1),
 	}
 
 	if cfg.DatabaseURL == "" {

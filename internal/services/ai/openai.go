@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/models"
@@ -22,6 +23,10 @@ const (
 	DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 	// DefaultTimeout is the default timeout for API calls
 	DefaultTimeout = 30 * time.Second
+	// DefaultMaxPromptTags is the default maximum number of tags to include in prompts
+	DefaultMaxPromptTags = 30
+	// DefaultTagsTokenPercent is the default percentage of available tokens to allocate for tags
+	DefaultTagsTokenPercent = 20
 
 	// ErrNoChoicesInResponse is returned when the API response has no choices
 	ErrNoChoicesInResponse = "no choices in response"
@@ -29,8 +34,10 @@ const (
 
 // OpenAIProvider implements the AIProvider interface using OpenAI's API
 type OpenAIProvider struct {
-	client openai.Client
-	model  string
+	client             openai.Client
+	model              string
+	maxPromptTags      int
+	tagsTokenPercent   int
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
@@ -50,8 +57,10 @@ func NewOpenAIProvider(apiKey string, model string) *OpenAIProvider {
 	)
 
 	return &OpenAIProvider{
-		client: client,
-		model:  model,
+		client:           client,
+		model:            model,
+		maxPromptTags:    DefaultMaxPromptTags,
+		tagsTokenPercent: DefaultTagsTokenPercent,
 	}
 }
 
@@ -75,8 +84,10 @@ func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *O
 	)
 
 	return &OpenAIProvider{
-		client: client,
-		model:  model,
+		client:           client,
+		model:            model,
+		maxPromptTags:    DefaultMaxPromptTags,
+		tagsTokenPercent: DefaultTagsTokenPercent,
 	}
 }
 
@@ -337,32 +348,10 @@ Return only valid JSON.`
 	if tagStats != nil && len(tagStats.TagStats) > 0 {
 		prompt += "\n\nExisting tags (prefer reusing these when semantically similar):"
 		
-		// Sort tags by total count (most used first) for better guidance
-		type tagEntry struct {
-			tag   string
-			total int
-		}
-		tagList := make([]tagEntry, 0, len(tagStats.TagStats))
-		for tag, stats := range tagStats.TagStats {
-			tagList = append(tagList, tagEntry{tag: tag, total: stats.Total})
-		}
+		// Select tags using smart algorithm that considers both frequency and relevance
+		selectedTags := p.selectTagsForPrompt(text, tagStats, prompt)
 		
-		// Simple sort by total count (descending)
-		for i := 0; i < len(tagList)-1; i++ {
-			for j := i + 1; j < len(tagList); j++ {
-				if tagList[i].total < tagList[j].total {
-					tagList[i], tagList[j] = tagList[j], tagList[i]
-				}
-			}
-		}
-		
-		// Format tag list (limit to top 50 to avoid prompt bloat)
-		maxTags := 50
-		if len(tagList) > maxTags {
-			tagList = tagList[:maxTags]
-		}
-		
-		for _, entry := range tagList {
+		for _, entry := range selectedTags {
 			stats := tagStats.TagStats[entry.tag]
 			prompt += fmt.Sprintf("\n- %s (used %d times", entry.tag, stats.Total)
 			if stats.AI > 0 || stats.User > 0 {
@@ -385,6 +374,135 @@ Return only valid JSON.`
 	return prompt
 }
 
+// tagEntry holds tag information for sorting and selection
+type tagEntry struct {
+	tag   string
+	total int
+	score float64 // Combined score for ranking
+}
+
+// selectTagsForPrompt selects tags to include in the prompt using a smart algorithm
+// that considers both frequency and relevance to the todo text, with token counting
+func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.TagStatistics, currentPrompt string) []tagEntry {
+	// Use defaults if not set (for backward compatibility and tests)
+	maxPromptTags := p.maxPromptTags
+	if maxPromptTags == 0 {
+		maxPromptTags = DefaultMaxPromptTags
+	}
+	tagsTokenPercent := p.tagsTokenPercent
+	if tagsTokenPercent == 0 {
+		tagsTokenPercent = DefaultTagsTokenPercent
+	}
+	
+	// Calculate available tokens for tags based on configured percentage
+	// Rough estimate: 1 token ~= 4 characters for English text
+	currentTokens := len(currentPrompt) / 4
+	
+	// Common model context limits (conservative estimates)
+	maxContextTokens := 8000 // Safe limit for most models
+	maxTagTokens := (maxContextTokens - currentTokens) * tagsTokenPercent / 100
+	
+	// Build tag list with relevance scores
+	tagList := make([]tagEntry, 0, len(tagStats.TagStats))
+	todoLower := strings.ToLower(todoText)
+	
+	for tag, stats := range tagStats.TagStats {
+		// Calculate relevance score
+		relevance := p.calculateTagRelevance(tag, todoLower)
+		
+		// Calculate frequency score (normalize by max possible)
+		// Higher usage count means higher frequency score
+		frequencyScore := float64(stats.Total)
+		
+		// Combined score: 70% relevance + 30% frequency
+		// Prioritize relevance but still favor frequently used tags
+		combinedScore := (0.7 * relevance) + (0.3 * frequencyScore/100.0)
+		
+		tagList = append(tagList, tagEntry{
+			tag:   tag,
+			total: stats.Total,
+			score: combinedScore,
+		})
+	}
+	
+	// Sort by combined score (descending)
+	for i := 0; i < len(tagList)-1; i++ {
+		for j := i + 1; j < len(tagList); j++ {
+			if tagList[i].score < tagList[j].score {
+				tagList[i], tagList[j] = tagList[j], tagList[i]
+			}
+		}
+	}
+	
+	// Select tags within token budget and count limits
+	selectedTags := make([]tagEntry, 0, maxPromptTags)
+	usedTokens := 0
+	
+	for _, entry := range tagList {
+		// Estimate tokens for this tag entry
+		// Format: "- tagname (used N times, X AI-generated, Y user-defined)\n"
+		tagEntryText := fmt.Sprintf("- %s (used %d times, %d AI-generated, %d user-defined)\n",
+			entry.tag, entry.total,
+			tagStats.TagStats[entry.tag].AI,
+			tagStats.TagStats[entry.tag].User)
+		tagTokens := len(tagEntryText) / 4
+		
+		// Check if adding this tag would exceed limits
+		if len(selectedTags) >= maxPromptTags {
+			break
+		}
+		if usedTokens+tagTokens > maxTagTokens {
+			break
+		}
+		
+		selectedTags = append(selectedTags, entry)
+		usedTokens += tagTokens
+	}
+	
+	return selectedTags
+}
+
+// calculateTagRelevance calculates how relevant a tag is to the todo text
+// Returns a score between 0 and 1
+func (p *OpenAIProvider) calculateTagRelevance(tag string, todoTextLower string) float64 {
+	tagLower := strings.ToLower(tag)
+	
+	// Exact match (case-insensitive)
+	if strings.Contains(todoTextLower, tagLower) {
+		return 1.0
+	}
+	
+	// Check for partial matches (word-based)
+	tagWords := strings.Fields(tagLower)
+	todoWords := strings.Fields(todoTextLower)
+	
+	matchCount := 0
+	for _, tagWord := range tagWords {
+		for _, todoWord := range todoWords {
+			// Exact word match
+			if tagWord == todoWord {
+				matchCount++
+				break
+			}
+			// Prefix match (e.g., "shop" matches "shopping")
+			if strings.HasPrefix(todoWord, tagWord) || strings.HasPrefix(tagWord, todoWord) {
+				matchCount++
+				break
+			}
+		}
+	}
+	
+	if len(tagWords) > 0 {
+		wordMatchScore := float64(matchCount) / float64(len(tagWords))
+		if wordMatchScore > 0 {
+			return 0.5 + (wordMatchScore * 0.5) // Score between 0.5 and 1.0 for partial matches
+		}
+	}
+	
+	// No match - return base score (still might be selected based on frequency)
+	return 0.1
+}
+
 // RegisterOpenAI registers the OpenAI provider with the registry
 func RegisterOpenAI(registry *ProviderRegistry) {
 	registry.Register("openai", func(config map[string]string) (AIProvider, error) {
@@ -395,7 +513,35 @@ func RegisterOpenAI(registry *ProviderRegistry) {
 
 		model := config["model"]
 		baseURL := config["base_url"]
+		
+		provider := NewOpenAIProviderWithConfig(apiKey, baseURL, model)
+		
+		// Apply optional configuration
+		if maxTags := config["max_prompt_tags"]; maxTags != "" {
+			if val, err := parseIntOrDefault(maxTags, DefaultMaxPromptTags); err == nil {
+				provider.maxPromptTags = val
+			}
+		}
+		
+		if tokenPercent := config["tags_token_percent"]; tokenPercent != "" {
+			if val, err := parseIntOrDefault(tokenPercent, DefaultTagsTokenPercent); err == nil {
+				provider.tagsTokenPercent = val
+			}
+		}
 
-		return NewOpenAIProviderWithConfig(apiKey, baseURL, model), nil
+		return provider, nil
 	})
+}
+
+// parseIntOrDefault parses a string to an int, returning the default if parsing fails
+func parseIntOrDefault(s string, defaultVal int) (int, error) {
+	if s == "" {
+		return defaultVal, nil
+	}
+	var result int
+	n, err := fmt.Sscanf(s, "%d", &result)
+	if err != nil || n != 1 {
+		return defaultVal, fmt.Errorf("invalid integer: %s", s)
+	}
+	return result, nil
 }

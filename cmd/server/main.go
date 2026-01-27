@@ -293,9 +293,11 @@ func createAIProvider(cfg *config.Config) (ai.AIProvider, error) {
 	}
 
 	config := map[string]string{
-		"api_key":  cfg.OpenAIKey,
-		"model":    cfg.AIModel,
-		"base_url": cfg.AIBaseURL,
+		"api_key":            cfg.OpenAIKey,
+		"model":              cfg.AIModel,
+		"base_url":           cfg.AIBaseURL,
+		"max_prompt_tags":    fmt.Sprintf("%d", cfg.AIMaxPromptTags),
+		"tags_token_percent": fmt.Sprintf("%d", cfg.AITagsTokenPercent),
 	}
 
 	return registry.GetProvider(providerType, config)
