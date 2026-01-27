@@ -1122,7 +1122,9 @@ async function saveTodoEdit(id, text, tags, dueDateText, todoEl) {
         // Optimistically set status to processing before triggering reprocessing
         // This ensures the UI shows "processing" immediately
         const todo = todos.find(t => t.id === id);
+        let originalStatus = null;
         if (todo) {
+            originalStatus = todo.status;
             todo.status = 'processing';
             // Remove edit mode class and re-render to show processing status
             if (todoEl) {
@@ -1135,7 +1137,15 @@ async function saveTodoEdit(id, text, tags, dueDateText, todoEl) {
         try {
             await analyzeTodo(id);
         } catch (error) {
-            logger.error('Failed to trigger reprocessing:', error);
+            // Don't log or update UI for auth errors (we're redirecting to login)
+            if (!error.isAuthError) {
+                logger.error('Failed to trigger reprocessing:', error);
+                // Roll back optimistic update if analyze fails
+                if (todo) {
+                    todo.status = originalStatus;
+                    renderTodos();
+                }
+            }
             // Don't fail the save if reprocessing fails
         }
         
