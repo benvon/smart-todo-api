@@ -98,14 +98,18 @@ func main() {
 	todoRepo.SetTagChangeHandler(func(ctx context.Context, userID uuid.UUID) error {
 		log.Printf("Tag change handler invoked for user %s", userID)
 		
-		// Always mark tag statistics as tainted (ensures stats will be refreshed)
+		var markTaintedErr error
+		
+		// Attempt to mark tag statistics as tainted (ensures stats will be refreshed)
 		_, err := tagStatsRepo.MarkTainted(ctx, userID)
 		if err != nil {
 			log.Printf("Failed to mark tag statistics as tainted for user %s: %v", userID, err)
-			return fmt.Errorf("failed to mark tag statistics as tainted: %w", err)
+			markTaintedErr = err
+			// Continue to enqueue the job despite this error to avoid inconsistent state
 		}
 		
-		// Always enqueue tag analysis job when tags change
+		// Always enqueue tag analysis job when tags change, even if MarkTainted failed
+		// The job will eventually fix the tainted state, allowing the system to self-heal
 		// Multiple jobs are fine - the analyzer will process them and re-analyze all todos
 		if jobQueue != nil {
 			tagJob := queue.NewJob(queue.JobTypeTagAnalysis, userID, nil)
@@ -114,6 +118,10 @@ func main() {
 			tagJob.NotBefore = &notBefore
 			if err := jobQueue.Enqueue(ctx, tagJob); err != nil {
 				log.Printf("Failed to enqueue tag analysis job for user %s: %v", userID, err)
+				// If both operations failed, return combined error
+				if markTaintedErr != nil {
+					return fmt.Errorf("failed to mark tainted and enqueue job: %w; %w", markTaintedErr, err)
+				}
 				return fmt.Errorf("failed to enqueue tag analysis job: %w", err)
 			}
 			log.Printf("Enqueued tag analysis job for user %s (debounced by %v) due to tag change", userID, debounceDelay)
@@ -121,6 +129,8 @@ func main() {
 			log.Printf("Job queue not available, cannot enqueue tag analysis job for user %s", userID)
 		}
 		
+		// If only MarkTainted failed but job was enqueued successfully, ignore the error
+		// The enqueued job will eventually update statistics and fix the tainted state
 		return nil
 	})
 
