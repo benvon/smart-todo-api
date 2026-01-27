@@ -16,5 +16,5 @@ type Metadata struct {
 	Context               []string             `json:"context,omitempty"`
 	Duration              *string              `json:"duration,omitempty"`
 	TimeEntered           *string              `json:"time_entered,omitempty"` // ISO8601 timestamp when todo was entered (for AI context)
-	TimeHorizonUserOverride *bool              `json:"time_horizon_user_override,omitempty"` // True if user manually set time_horizon
+	TimeHorizonUserOverride *bool              `json:"time_horizon_user_override"` // True if user manually set time_horizon
 }
