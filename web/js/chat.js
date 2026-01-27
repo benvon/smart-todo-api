@@ -221,10 +221,10 @@ function addChatMessage(role, content) {
             } catch (error) {
                 logger.error('Failed to append to context:', error);
                 appendBtn.textContent = 'Failed';
-                appendBtn.classList.add('btn-danger');
+                appendBtn.classList.add('btn-delete');
                 setTimeout(() => {
                     appendBtn.textContent = originalText;
-                    appendBtn.classList.remove('btn-danger');
+                    appendBtn.classList.remove('btn-delete');
                 }, 2000);
             }
         });
