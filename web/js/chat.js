@@ -238,9 +238,6 @@ function addChatMessage(role, content) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-/**
- * Show error message (reuse from app.js if available)
- */
 // Export functions for ES module use
 export { initChat, handleSendMessage, addChatMessage, handleLoadContext, handleSaveContext, appendToContext };
 
