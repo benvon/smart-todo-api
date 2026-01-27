@@ -57,15 +57,15 @@ async function loadContext() {
         // Validate response structure and data types
         if (response && typeof response === 'object' && 
             response.data && typeof response.data === 'object') {
-            // Ensure context_summary is a string (or null/undefined)
+            // Ensure context_summary is a string before updating currentContext
             const contextSummary = response.data.context_summary;
             if (typeof contextSummary === 'string') {
                 currentContext = contextSummary;
             } else if (contextSummary === null || contextSummary === undefined) {
-                // Explicitly handle null/undefined - keep currentContext as empty string
+                // API returned null/undefined - treat as empty context
                 currentContext = '';
             } else {
-                // Unexpected type - log warning and keep current context
+                // Unexpected type - log warning and preserve current context
                 logger.warn('Unexpected context_summary type:', typeof contextSummary);
             }
         }
@@ -85,11 +85,25 @@ async function handleLoadContext() {
     
     try {
         const response = await getAIContext();
-        if (response.data && response.data.context_summary) {
-            currentContext = response.data.context_summary;
-            chatInput.value = currentContext;
-            chatInput.focus();
+        // Validate response structure and data types
+        if (response && typeof response === 'object' && 
+            response.data && typeof response.data === 'object') {
+            const contextSummary = response.data.context_summary;
+            if (typeof contextSummary === 'string') {
+                currentContext = contextSummary;
+                chatInput.value = currentContext;
+                chatInput.focus();
+            } else if (contextSummary === null || contextSummary === undefined) {
+                // API returned null/undefined - treat as empty context
+                currentContext = '';
+                chatInput.value = '';
+            } else {
+                // Unexpected type - log warning and clear input
+                logger.warn('Unexpected context_summary type:', typeof contextSummary);
+                chatInput.value = '';
+            }
         } else {
+            // Invalid response structure - clear input
             chatInput.value = '';
         }
     } catch (error) {
