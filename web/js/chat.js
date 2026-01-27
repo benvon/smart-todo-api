@@ -2,6 +2,7 @@
 
 import { sendChatMessage, getAIContext, updateAIContext } from './api.js';
 import logger from './logger.js';
+import { showError } from './error-utils.js';
 
 let currentContext = '';
 
@@ -240,17 +241,6 @@ function addChatMessage(role, content) {
 /**
  * Show error message (reuse from app.js if available)
  */
-function showError(message) {
-    const errorEl = document.getElementById('error-message');
-    if (errorEl) {
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-        setTimeout(() => {
-            errorEl.style.display = 'none';
-        }, 5000);
-    }
-}
-
 // Export functions for ES module use
 export { initChat, handleSendMessage, addChatMessage, handleLoadContext, handleSaveContext, appendToContext };
 

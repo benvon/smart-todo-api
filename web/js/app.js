@@ -6,6 +6,7 @@ import { parseNaturalDate, extractDateFromText, formatDate } from './dateutils.j
 import { initChat } from './chat.js';
 import { initProfile } from './profile.js';
 import logger from './logger.js';
+import { showError } from './error-utils.js';
 
 let todos = [];
 
@@ -1151,16 +1152,4 @@ async function saveTodoEdit(id, text, tags, dueDateText, todoEl) {
     }
 }
 
-/**
- * Show error message
- */
-function showError(message) {
-    const errorEl = document.getElementById('error-message');
-    if (errorEl) {
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-        setTimeout(() => {
-            errorEl.style.display = 'none';
-        }, 5000);
-    }
-}
+

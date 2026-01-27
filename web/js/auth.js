@@ -3,6 +3,7 @@
 import { getOIDCLoginConfig } from './api.js';
 import { storeToken, getToken, isTokenExpired, removeToken } from './jwt.js';
 import logger from './logger.js';
+import { showError } from './error-utils.js';
 
 /**
  * Initiate OIDC login flow
@@ -172,17 +173,6 @@ function generateState() {
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
     return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Show error message
- */
-function showError(message) {
-    const errorEl = document.getElementById('error-message');
-    if (errorEl) {
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-    }
 }
 
 // Export functions for ES module use
