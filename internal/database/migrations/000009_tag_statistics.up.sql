@@ -9,5 +9,6 @@ CREATE TABLE tag_statistics (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX idx_tag_statistics_user_id ON tag_statistics(user_id);
 CREATE INDEX idx_tag_statistics_tainted ON tag_statistics(tainted);
 CREATE INDEX idx_tag_statistics_last_analyzed_at ON tag_statistics(last_analyzed_at);
