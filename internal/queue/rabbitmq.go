@@ -421,9 +421,9 @@ func (q *RabbitMQQueue) HealthCheck(ctx context.Context) error {
 	if q.channel.IsClosed() {
 		return fmt.Errorf("RabbitMQ channel is closed")
 	}
-	// Try a lightweight operation to verify connectivity by passively inspecting the queue.
+	// Try a lightweight operation to verify connectivity by passively declaring the queue.
 	// This performs a round-trip to the broker without modifying queue state.
-	if _, err := q.channel.QueueInspect(q.queueName); err != nil {
+	if _, err := q.channel.QueueDeclarePassive(q.queueName, true, false, false, false, nil); err != nil {
 		return fmt.Errorf("RabbitMQ health check failed: %w", err)
 	}
 	return nil
