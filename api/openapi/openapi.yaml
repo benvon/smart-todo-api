@@ -229,6 +229,73 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/todos/tags/stats:
+    get:
+      summary: Get tag statistics
+      description: Returns aggregated tag statistics for the authenticated user
+      tags:
+        - Todos
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tag statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagStatsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ai/context:
+    get:
+      summary: Get AI context
+      description: Returns the current user's AI context (context summary and preferences)
+      tags:
+        - AI
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: AI context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIContextResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      summary: Update AI context
+      description: Updates the current user's AI context (context summary and/or preferences)
+      tags:
+        - AI
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAIContextRequest'
+      responses:
+        '200':
+          description: AI context updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIContextResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/openapi.yaml:
     get:
       summary: Get OpenAPI specification (YAML)
@@ -336,7 +403,9 @@ components:
           maxLength: 1000
         time_horizon:
           type: string
-          enum: [now, soon, later]
+          nullable: true
+          description: "Time horizon for the todo. Valid values: 'next', 'soon', 'later'. Set to empty string or null to clear user override and allow AI to manage."
+          enum: [next, soon, later]
         status:
           type: string
           enum: [pending, processing, completed]
@@ -354,7 +423,7 @@ components:
           type: string
         time_horizon:
           type: string
-          enum: [now, soon, later]
+          enum: [next, soon, later]
         status:
           type: string
           enum: [pending, processing, completed]
@@ -410,6 +479,54 @@ components:
         timestamp:
           type: string
           format: date-time
+
+    TagStatsResponse:
+      type: object
+      properties:
+        tag_stats:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              total:
+                type: integer
+                description: Total count of todos with this tag
+              ai:
+                type: integer
+                description: Count of todos where tag was AI-generated
+              user:
+                type: integer
+                description: Count of todos where tag was user-defined
+        tainted:
+          type: boolean
+          description: Whether the statistics are being recomputed
+        last_analyzed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the statistics were last analyzed
+
+    AIContextResponse:
+      type: object
+      properties:
+        context_summary:
+          type: string
+          description: User-driven context summary used for todo classification
+        preferences:
+          type: object
+          additionalProperties: true
+          description: User preferences stored as key-value pairs
+
+    UpdateAIContextRequest:
+      type: object
+      properties:
+        context_summary:
+          type: string
+          description: User-driven context summary to update
+        preferences:
+          type: object
+          additionalProperties: true
+          description: User preferences to update (merged with existing)
 
     Error:
       type: object

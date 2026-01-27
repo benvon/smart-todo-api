@@ -11,8 +11,10 @@ import (
 // This interface enables better testability by allowing mock implementations
 type TodoRepositoryInterface interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Todo, error)
-	Update(ctx context.Context, todo *models.Todo) error
+	Update(ctx context.Context, todo *models.Todo, oldTags []string) error
 	GetByUserIDPaginated(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error)
+	SetTagStatsRepo(repo TagStatisticsRepositoryInterface)      // Optional: for tag change detection
+	SetTagChangeHandler(handler TagChangeHandler)                // Optional: callback when tags change
 }
 
 // AIContextRepositoryInterface defines the interface for AI context repository operations
@@ -26,9 +28,18 @@ type UserActivityRepositoryInterface interface {
 	GetEligibleUsersForReprocessing(ctx context.Context) ([]uuid.UUID, error)
 }
 
+// TagStatisticsRepositoryInterface defines the interface for tag statistics repository operations
+type TagStatisticsRepositoryInterface interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	GetByUserIDOrCreate(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	UpdateStatistics(ctx context.Context, stats *models.TagStatistics) (bool, error)
+	MarkTainted(ctx context.Context, userID uuid.UUID) (bool, error)
+}
+
 // Ensure concrete types implement the interfaces
 var (
 	_ TodoRepositoryInterface        = (*TodoRepository)(nil)
 	_ AIContextRepositoryInterface   = (*AIContextRepository)(nil)
 	_ UserActivityRepositoryInterface = (*UserActivityRepository)(nil)
+	_ TagStatisticsRepositoryInterface = (*TagStatisticsRepository)(nil)
 )

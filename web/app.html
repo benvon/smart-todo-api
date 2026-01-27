@@ -12,13 +12,58 @@
         <header>
             <h1>Smart Todo</h1>
             <div class="header-actions">
-                <div id="api-status" class="api-status">
+                <div id="api-status" class="api-status api-status-clickable">
                     <span class="api-status-indicator" id="api-status-indicator"></span>
                     <span class="api-status-text" id="api-status-text">Checking...</span>
+                    <div id="api-status-dropdown" class="api-status-dropdown" style="display: none;">
+                        <div class="api-status-dropdown-header">
+                            <strong>Extended Health Status</strong>
+                        </div>
+                        <div id="api-status-dropdown-content" class="api-status-dropdown-content">
+                            <p class="loading-message">Loading...</p>
+                        </div>
+                    </div>
                 </div>
-                <button id="logout-button" class="btn btn-secondary">Logout</button>
+                <button id="user-profile-button" class="btn btn-secondary">Profile</button>
             </div>
         </header>
+        
+        <!-- User Profile Panel -->
+        <div id="profile-panel" class="profile-panel" style="display: none;">
+            <div class="profile-panel-content">
+                <div class="profile-panel-header">
+                    <h2>User Profile</h2>
+                    <button id="profile-close-button" class="btn btn-small">×</button>
+                </div>
+                <div class="profile-panel-body">
+                    <div class="profile-section">
+                        <h3>User Information</h3>
+                        <div id="user-info" class="user-info">
+                            <p><strong>Name:</strong> <span id="user-name">Loading...</span></p>
+                            <p><strong>Email:</strong> <span id="user-email">Loading...</span></p>
+                        </div>
+                    </div>
+                    
+                    <div class="profile-section">
+                        <h3>AI Context</h3>
+                        <p class="profile-description">This context is used when classifying todo items to better understand your preferences.</p>
+                        <textarea id="context-textarea" class="context-textarea" placeholder="Enter your preferences and context here..."></textarea>
+                        <button id="save-context-button" class="btn btn-primary">Save Context</button>
+                    </div>
+                    
+                    <div class="profile-section">
+                        <h3>Tag Statistics</h3>
+                        <div id="tag-stats" class="tag-stats">
+                            <p class="loading-message">Loading tag statistics...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="profile-section">
+                        <button id="profile-logout-button" class="btn btn-secondary">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <div class="todo-input-section">
             <input type="text" id="todo-input" placeholder="Add a new todo..." class="todo-input">
@@ -47,6 +92,10 @@
             <div class="chat-header">
                 <h2>AI Assistant</h2>
                 <span class="chat-subtitle">Get help with your todos and preferences</span>
+            </div>
+            <div class="chat-context-controls">
+                <button id="chat-load-context-button" class="btn btn-small btn-secondary">Load Context</button>
+                <button id="chat-save-context-button" class="btn btn-small btn-secondary">Save Context</button>
             </div>
             <div id="chat-messages" class="chat-messages"></div>
             <div class="chat-input-section">

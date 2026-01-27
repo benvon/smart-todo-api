@@ -406,3 +406,25 @@ func (q *RabbitMQQueue) Close() error {
 	}
 	return err
 }
+
+// HealthCheck verifies the RabbitMQ connection is healthy
+func (q *RabbitMQQueue) HealthCheck(ctx context.Context) error {
+	if q.conn == nil {
+		return fmt.Errorf("RabbitMQ connection is nil")
+	}
+	if q.conn.IsClosed() {
+		return fmt.Errorf("RabbitMQ connection is closed")
+	}
+	if q.channel == nil {
+		return fmt.Errorf("RabbitMQ channel is nil")
+	}
+	if q.channel.IsClosed() {
+		return fmt.Errorf("RabbitMQ channel is closed")
+	}
+	// Try a lightweight operation to verify connectivity by passively declaring the queue.
+	// This performs a round-trip to the broker without modifying queue state.
+	if _, err := q.channel.QueueDeclarePassive(q.queueName, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("RabbitMQ health check failed: %w", err)
+	}
+	return nil
+}

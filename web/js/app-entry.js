@@ -7,4 +7,5 @@ import './dateutils.js';
 import './api.js';
 import './auth.js';
 import './chat.js';
+import './profile.js';
 import './app.js';

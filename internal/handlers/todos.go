@@ -20,8 +20,9 @@ import (
 
 // TodoHandler handles todo-related requests
 type TodoHandler struct {
-	todoRepo *database.TodoRepository
-	jobQueue queue.JobQueue // Optional - if nil, job enqueueing is disabled
+	todoRepo     *database.TodoRepository
+	tagStatsRepo database.TagStatisticsRepositoryInterface
+	jobQueue     queue.JobQueue // Optional - if nil, job enqueueing is disabled
 }
 
 // NewTodoHandler creates a new todo handler
@@ -37,11 +38,24 @@ func NewTodoHandlerWithQueue(todoRepo *database.TodoRepository, jobQueue queue.J
 	}
 }
 
+// NewTodoHandlerWithQueueAndTagStats creates a new todo handler with job queue and tag statistics support
+func NewTodoHandlerWithQueueAndTagStats(todoRepo *database.TodoRepository, tagStatsRepo database.TagStatisticsRepositoryInterface, jobQueue queue.JobQueue) *TodoHandler {
+	return &TodoHandler{
+		todoRepo:     todoRepo,
+		tagStatsRepo: tagStatsRepo,
+		jobQueue:     jobQueue,
+	}
+}
+
 // RegisterRoutes registers todo routes on the given router
 // The router should already have the /todos prefix (e.g., from apiRouter.PathPrefix("/todos"))
 func (h *TodoHandler) RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("", h.ListTodos).Methods("GET")
 	r.HandleFunc("", h.CreateTodo).Methods("POST")
+	// Only register tag stats route if tagStatsRepo is available
+	if h.tagStatsRepo != nil {
+		r.HandleFunc("/tags/stats", h.GetTagStats).Methods("GET")
+	}
 	r.HandleFunc("/{id}", h.GetTodo).Methods("GET")
 	r.HandleFunc("/{id}", h.UpdateTodo).Methods("PATCH")
 	r.HandleFunc("/{id}", h.DeleteTodo).Methods("DELETE")
@@ -68,11 +82,11 @@ type CreateTodoRequest struct {
 
 // UpdateTodoRequest represents an update todo request
 type UpdateTodoRequest struct {
-	Text        *string             `json:"text,omitempty"`
-	TimeHorizon *models.TimeHorizon `json:"time_horizon,omitempty"`
-	Status      *models.TodoStatus  `json:"status,omitempty"`
-	Tags        *[]string           `json:"tags,omitempty"`     // User-defined tags (overrides AI tags)
-	DueDate     *string             `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
+	Text        *string            `json:"text,omitempty"`
+	TimeHorizon *string            `json:"time_horizon,omitempty"` // Empty string to clear user override and let AI manage
+	Status      *models.TodoStatus `json:"status,omitempty"`
+	Tags        *[]string          `json:"tags,omitempty"`     // User-defined tags (overrides AI tags)
+	DueDate     *string            `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
 }
 
 // ListTodosResponse represents the paginated response for listing todos
@@ -234,6 +248,7 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue AI analysis job if job queue is available
+	// Note: Tag change detection is handled automatically by the repository
 	if h.jobQueue != nil {
 		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
 		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
@@ -309,6 +324,9 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save old tags for tag change detection
+	oldTags := todo.Metadata.CategoryTags
+
 	var req UpdateTodoRequest
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&req); err != nil {
@@ -327,6 +345,7 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update fields if provided with validation
+	// Note: Tag change detection is handled automatically by the repository
 	if req.Text != nil {
 		// Sanitize text input
 		sanitized := validation.SanitizeText(*req.Text)
@@ -341,13 +360,23 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		todo.Text = sanitized
 	}
 	if req.TimeHorizon != nil {
-		// Validate enum value
-		if err := validation.ValidateTimeHorizon(string(*req.TimeHorizon)); err != nil {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
-			return
+		// Empty string means clear the user override and let AI manage time horizon
+		if *req.TimeHorizon == "" {
+			// Clear the user override flag to allow AI to manage time horizon again
+			override := false
+			todo.Metadata.TimeHorizonUserOverride = &override
+		} else {
+			// Validate enum value
+			if err := validation.ValidateTimeHorizon(*req.TimeHorizon); err != nil {
+				respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+				return
+			}
+			// User explicitly setting time horizon - mark as user override
+			todo.TimeHorizon = models.TimeHorizon(*req.TimeHorizon)
+			// Mark that user has manually set the time horizon
+			override := true
+			todo.Metadata.TimeHorizonUserOverride = &override
 		}
-		// User explicitly setting time horizon - mark as user override
-		todo.TimeHorizon = *req.TimeHorizon
 	}
 	if req.Status != nil {
 		// Validate enum value
@@ -376,10 +405,12 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.todoRepo.Update(ctx, todo); err != nil {
+	if err := h.todoRepo.Update(ctx, todo, oldTags); err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to update todo")
 		return
 	}
+
+	// Note: Tag change detection is handled automatically by the repository
 
 	respondJSON(w, http.StatusOK, todo)
 }
@@ -448,12 +479,15 @@ func (h *TodoHandler) CompleteTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save old tags for tag change detection
+	oldTags := todo.Metadata.CategoryTags
+
 	// Mark as completed
 	now := time.Now()
 	todo.Status = models.TodoStatusCompleted
 	todo.CompletedAt = &now
 
-	if err := h.todoRepo.Update(ctx, todo); err != nil {
+	if err := h.todoRepo.Update(ctx, todo, oldTags); err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to complete todo")
 		return
 	}
@@ -509,4 +543,44 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 	// Job queue not available
 	log.Printf("Job queue not available - AI analysis requested for todo %s (user %s)", todo.ID, user.ID)
 	respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "AI analysis is not available")
+}
+
+// TagStatsResponse represents the response for tag statistics
+type TagStatsResponse struct {
+	TagStats       map[string]models.TagStats `json:"tag_stats"`
+	Tainted        bool                       `json:"tainted"`
+	LastAnalyzedAt *time.Time                 `json:"last_analyzed_at,omitempty"`
+}
+
+// GetTagStats returns tag statistics for the authenticated user
+func (h *TodoHandler) GetTagStats(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r)
+	if user == nil {
+		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
+		return
+	}
+
+	// Defensive check: tagStatsRepo should not be nil if route is registered
+	// but check anyway to prevent panic
+	if h.tagStatsRepo == nil {
+		respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "Tag statistics are not available")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get tag statistics (or create if doesn't exist)
+	stats, err := h.tagStatsRepo.GetByUserIDOrCreate(ctx, user.ID)
+	if err != nil {
+		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve tag statistics")
+		return
+	}
+
+	response := TagStatsResponse{
+		TagStats:       stats.TagStats,
+		Tainted:        stats.Tainted,
+		LastAnalyzedAt: stats.LastAnalyzedAt,
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }

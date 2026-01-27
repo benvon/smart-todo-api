@@ -70,6 +70,11 @@ func (r *RedisRateLimiter) Close() error {
 	return r.client.Close()
 }
 
+// Ping checks if Redis is reachable
+func (r *RedisRateLimiter) Ping(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}
+
 // LimitCounter implements httprate.LimitCounter interface for Redis
 type redisLimitCounter struct {
 	client *redis.Client

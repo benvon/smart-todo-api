@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/gorilla/mux"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/services/oidc"
+	"github.com/gorilla/mux"
 )
 
 // AuthHandler handles authentication-related requests
@@ -32,7 +32,7 @@ func (h *AuthHandler) RegisterRoutes(r *mux.Router) {
 // GetOIDCLogin returns OIDC configuration for frontend
 func (h *AuthHandler) GetOIDCLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// Get login config for configured provider
 	loginConfig, err := h.oidcProvider.GetLoginConfig(ctx, h.providerName)
 	if err != nil {

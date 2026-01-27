@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 )
 
 const (
@@ -16,14 +17,29 @@ const (
 	MaxPageSize = 500
 )
 
+// TagChangeHandler handles tag change events (callback to avoid circular dependencies)
+type TagChangeHandler func(ctx context.Context, userID uuid.UUID) error
+
 // TodoRepository handles todo database operations
 type TodoRepository struct {
-	db *DB
+	db               *DB
+	tagStatsRepo     TagStatisticsRepositoryInterface // Optional: for automatic tag change detection
+	tagChangeHandler TagChangeHandler                 // Optional: callback when tags change
 }
 
 // NewTodoRepository creates a new todo repository
 func NewTodoRepository(db *DB) *TodoRepository {
 	return &TodoRepository{db: db}
+}
+
+// SetTagChangeHandler sets a callback to be invoked when tags change
+func (r *TodoRepository) SetTagChangeHandler(handler TagChangeHandler) {
+	r.tagChangeHandler = handler
+}
+
+// SetTagStatsRepo sets the tag statistics repository for automatic tag change detection
+func (r *TodoRepository) SetTagStatsRepo(repo TagStatisticsRepositoryInterface) {
+	r.tagStatsRepo = repo
 }
 
 // Create creates a new todo
@@ -33,17 +49,17 @@ func (r *TodoRepository) Create(ctx context.Context, todo *models.Todo) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING created_at, updated_at
 	`
-	
+
 	metadataJSON, err := json.Marshal(todo.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
-	
+
 	var dueDate sql.NullTime
 	if todo.DueDate != nil {
 		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		todo.ID,
@@ -56,11 +72,11 @@ func (r *TodoRepository) Create(ctx context.Context, todo *models.Todo) error {
 		now,
 		now,
 	).Scan(&todo.CreatedAt, &todo.UpdatedAt)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to create todo: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -70,13 +86,13 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 	var metadataJSON []byte
 	var completedAt sql.NullTime
 	var dueDate sql.NullTime
-	
+
 	query := `
 		SELECT id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at, completed_at
 		FROM todos
 		WHERE id = $1
 	`
-	
+
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
 		&todo.ID,
 		&todo.UserID,
@@ -89,31 +105,31 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 		&todo.UpdatedAt,
 		&completedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("todo not found: %w", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get todo: %w", err)
 	}
-	
+
 	if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
-	
+
 	// Initialize TagSources if nil
 	if todo.Metadata.TagSources == nil {
 		todo.Metadata.TagSources = make(map[string]models.TagSource)
 	}
-	
+
 	if dueDate.Valid {
 		todo.DueDate = &dueDate.Time
 	}
-	
+
 	if completedAt.Valid {
 		todo.CompletedAt = &completedAt.Time
 	}
-	
+
 	return todo, nil
 }
 
@@ -206,7 +222,7 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 		if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
 			return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
 		}
-		
+
 		// Initialize TagSources if nil
 		if todo.Metadata.TagSources == nil {
 			todo.Metadata.TagSources = make(map[string]models.TagSource)
@@ -231,29 +247,48 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 }
 
 // Update updates an existing todo
-func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
+// oldTags should be the CategoryTags from the existing todo before the update (pass nil to skip tag change detection)
+func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags []string) error {
+	// Detect tag changes if tag statistics support is enabled
+	var tagsChanged bool
+	if r.tagStatsRepo != nil && oldTags != nil {
+		// Compare tags using tagsEqual which handles nil normalization
+		tagsChanged = !tagsEqual(oldTags, todo.Metadata.CategoryTags)
+		if tagsChanged {
+			log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, todo.Metadata.CategoryTags)
+		} else {
+			log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, todo.Metadata.CategoryTags)
+		}
+	} else {
+		if r.tagStatsRepo == nil {
+			log.Printf("Tag stats repo not configured for todo repository, skipping tag change detection")
+		} else {
+			log.Printf("Old tags not provided for todo %s, skipping tag change detection", todo.ID)
+		}
+	}
+
 	query := `
 		UPDATE todos
 		SET text = $2, time_horizon = $3, status = $4, metadata = $5, due_date = $6, updated_at = $7, completed_at = $8
 		WHERE id = $1
 		RETURNING updated_at
 	`
-	
+
 	metadataJSON, err := json.Marshal(todo.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
-	
+
 	var dueDate sql.NullTime
 	if todo.DueDate != nil {
 		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
 	}
-	
+
 	var completedAt sql.NullTime
 	if todo.CompletedAt != nil {
 		completedAt = sql.NullTime{Time: *todo.CompletedAt, Valid: true}
 	}
-	
+
 	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
 		todo.ID,
@@ -265,34 +300,105 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 		now,
 		completedAt,
 	).Scan(&todo.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("todo not found")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
-	
+
+	// If tags changed, invoke the tag change handler
+	if tagsChanged && r.tagChangeHandler != nil {
+		log.Printf("Invoking tag change handler for user %s (todo %s)", todo.UserID, todo.ID)
+		if err := r.tagChangeHandler(ctx, todo.UserID); err != nil {
+			// Log error but don't fail the update
+			// Tag analysis can happen later
+			log.Printf("Tag change handler failed for user %s: %v", todo.UserID, err)
+		} else {
+			log.Printf("Tag change handler completed successfully for user %s", todo.UserID)
+		}
+	} else if tagsChanged && r.tagChangeHandler == nil {
+		log.Printf("Tags changed for todo %s but no tag change handler configured", todo.ID)
+	}
+
 	return nil
+}
+
+// tagsEqual compares two tag slices for equality (order-independent)
+// Handles nil slices as empty slices
+func tagsEqual(a, b []string) bool {
+	// Normalize nil to empty slice
+	if a == nil {
+		a = []string{}
+	}
+	if b == nil {
+		b = []string{}
+	}
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Both empty - equal
+	if len(a) == 0 {
+		return true
+	}
+
+	// Create maps for O(n) comparison
+	mapA := make(map[string]int)
+	mapB := make(map[string]int)
+
+	// Track seen tags to detect and warn about duplicates
+	seenA := make(map[string]struct{})
+	for _, tag := range a {
+		if _, exists := seenA[tag]; exists {
+			log.Printf("tagsEqual: duplicate tag %q detected in first tag slice", tag)
+		} else {
+			seenA[tag] = struct{}{}
+		}
+		mapA[tag]++
+	}
+
+	seenB := make(map[string]struct{})
+	for _, tag := range b {
+		if _, exists := seenB[tag]; exists {
+			log.Printf("tagsEqual: duplicate tag %q detected in second tag slice", tag)
+		} else {
+			seenB[tag] = struct{}{}
+		}
+		mapB[tag]++
+	}
+
+	if len(mapA) != len(mapB) {
+		return false
+	}
+
+	for tag, count := range mapA {
+		if mapB[tag] != count {
+			return false
+		}
+	}
+	return true
 }
 
 // Delete deletes a todo by ID
 func (r *TodoRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM todos WHERE id = $1`
-	
+
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete todo: %w", err)
 	}
-	
+
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
-	
+
 	if rowsAffected == 0 {
 		return fmt.Errorf("todo not found")
 	}
-	
+
 	return nil
 }

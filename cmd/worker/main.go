@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +16,7 @@ import (
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/benvon/smart-todo/internal/workers"
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -49,6 +52,47 @@ func main() {
 	todoRepo := database.NewTodoRepository(db)
 	contextRepo := database.NewAIContextRepository(db)
 	activityRepo := database.NewUserActivityRepository(db)
+	tagStatsRepo := database.NewTagStatisticsRepository(db)
+
+	// Set up automatic tag change detection in todo repository
+	todoRepo.SetTagStatsRepo(tagStatsRepo)
+	todoRepo.SetTagChangeHandler(func(ctx context.Context, userID uuid.UUID) error {
+		log.Printf("Tag change handler invoked for user %s", userID)
+		
+		// Attempt to mark tag statistics as tainted (ensures stats will be refreshed)
+		var markTaintedErr error
+		_, err := tagStatsRepo.MarkTainted(ctx, userID)
+		if err != nil {
+			log.Printf("Failed to mark tag statistics as tainted for user %s: %v", userID, err)
+			markTaintedErr = err
+			// Continue to enqueue the job despite this error to avoid inconsistent state
+		}
+		
+		// Always enqueue tag analysis job when tags change, even if MarkTainted failed
+		// The job will eventually fix the tainted state, allowing the system to self-heal
+		// Multiple jobs are fine - the analyzer will process them and re-analyze all todos
+		if jobQueue != nil {
+			tagJob := queue.NewJob(queue.JobTypeTagAnalysis, userID, nil)
+			debounceDelay := 5 * time.Second
+			notBefore := time.Now().Add(debounceDelay)
+			tagJob.NotBefore = &notBefore
+			if err := jobQueue.Enqueue(ctx, tagJob); err != nil {
+				log.Printf("Failed to enqueue tag analysis job for user %s: %v", userID, err)
+				// If both operations failed, return combined error
+				if markTaintedErr != nil {
+					return errors.Join(markTaintedErr, fmt.Errorf("failed to enqueue tag analysis job: %w", err))
+				}
+				return fmt.Errorf("failed to enqueue tag analysis job: %w", err)
+			}
+			log.Printf("Enqueued tag analysis job for user %s (debounced by %v) due to tag change", userID, debounceDelay)
+		} else {
+			log.Printf("Job queue not available, cannot enqueue tag analysis job for user %s", userID)
+		}
+		
+		// If only MarkTainted failed but job was enqueued successfully, ignore the error
+		// The enqueued job will eventually update statistics and fix the tainted state
+		return nil
+	})
 
 	// Initialize AI provider
 	aiProvider, err := createAIProvider(cfg)
@@ -57,8 +101,9 @@ func main() {
 	}
 
 	// Initialize workers
-	analyzer := workers.NewTaskAnalyzer(aiProvider, todoRepo, contextRepo, activityRepo, jobQueue)
+	analyzer := workers.NewTaskAnalyzer(aiProvider, todoRepo, contextRepo, activityRepo, tagStatsRepo, jobQueue)
 	reprocessor := workers.NewReprocessor(jobQueue, activityRepo)
+	tagAnalyzer := workers.NewTagAnalyzer(todoRepo, tagStatsRepo)
 
 	// Start garbage collector
 	gc := queue.NewGarbageCollector(jobQueue, 1*time.Hour, 7*24*time.Hour)
@@ -136,8 +181,23 @@ func main() {
 					return
 				}
 
-				// Process job
-				if err := analyzer.ProcessJob(ctx, msg); err != nil {
+				// Route job to appropriate worker based on job type
+				job := msg.GetJob()
+				var err error
+				switch job.Type {
+				case queue.JobTypeTagAnalysis:
+					err = tagAnalyzer.ProcessJob(ctx, msg)
+				case queue.JobTypeTaskAnalysis, queue.JobTypeReprocessUser:
+					err = analyzer.ProcessJob(ctx, msg)
+				default:
+					log.Printf("Unknown job type: %s", job.Type)
+					if nackErr := msg.Nack(false); nackErr != nil {
+						log.Printf("Failed to nack unknown job type: %v", nackErr)
+					}
+					continue
+				}
+
+				if err != nil {
 					log.Printf("Failed to process job: %v", err)
 					// Error handling (including retries) is done in ProcessJob
 					// For rate limit errors, ProcessJob handles re-enqueueing with delays
