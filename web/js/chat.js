@@ -68,6 +68,9 @@ async function loadContext() {
                 // Unexpected type - log warning and preserve current context
                 logger.warn('Unexpected context_summary type:', typeof contextSummary);
             }
+        } else {
+            // Invalid response structure - clear context
+            currentContext = '';
         }
     } catch (error) {
         logger.error('Failed to load context:', error);
@@ -98,7 +101,7 @@ async function handleLoadContext() {
                 currentContext = '';
                 chatInput.value = '';
             } else {
-                // Unexpected type - log warning and clear input
+                // Unexpected type - log warning, preserve current context, and clear input
                 logger.warn('Unexpected context_summary type:', typeof contextSummary);
                 chatInput.value = '';
             }
