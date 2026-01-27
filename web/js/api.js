@@ -34,17 +34,75 @@ async function apiRequest(endpoint, options = {}) {
         throw authError;
     }
 
+    // Ensure API_BASE_URL is set
+    if (!window.API_BASE_URL) {
+        const configError = new Error('API_BASE_URL is not configured. Please check your config.json file.');
+        configError.isConfigError = true;
+        throw configError;
+    }
+    
     const url = `${window.API_BASE_URL}${endpoint}`;
     const headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         ...options.headers
     };
+    
 
-    const response = await fetch(url, {
-        ...options,
-        headers
-    });
+    let response;
+    try {
+        response = await fetch(url, {
+            ...options,
+            headers
+        });
+    } catch (error) {
+        // Log the actual error for debugging
+        // eslint-disable-next-line no-console
+        console.error('Fetch error caught:', {
+            error,
+            name: error?.name,
+            message: error?.message,
+            url,
+            method: options.method || 'GET'
+        });
+        
+        // Handle network errors (failed to fetch, CORS, etc.)
+        // Fetch errors are typically TypeErrors with messages like "Failed to fetch" or "NetworkError"
+        // But we need to be careful - not all TypeErrors are network errors
+        // Common fetch error messages:
+        // - "Failed to fetch" - network/CORS error
+        // - "NetworkError" - network error
+        // - "Load failed" - network error
+        // - "Network request failed" - network error
+        const errorMessage = error?.message || '';
+        const errorName = error?.name || '';
+        const isNetworkError = (
+            // TypeError with fetch-related messages
+            (error instanceof TypeError && (
+                errorMessage.includes('fetch') || 
+                errorMessage.includes('network') ||
+                errorMessage.includes('Failed to') ||
+                errorMessage === 'Failed to fetch' ||
+                errorMessage.includes('Load failed') ||
+                errorMessage.includes('Network request failed')
+            )) ||
+            // DOMException NetworkError
+            (error instanceof DOMException && errorName === 'NetworkError') ||
+            // Error with NetworkError name
+            errorName === 'NetworkError' ||
+            // AbortError (request cancelled) - treat as network issue
+            (error instanceof DOMException && errorName === 'AbortError')
+        );
+        
+        if (isNetworkError) {
+            const networkError = new Error(`Network error: Unable to reach server at ${window.API_BASE_URL}. Please check your connection and try again.`);
+            networkError.isNetworkError = true;
+            networkError.originalError = error;
+            throw networkError;
+        }
+        // Re-throw other errors as-is
+        throw error;
+    }
 
     if (!response.ok) {
         // Handle unauthorized (401) - trigger re-authentication
@@ -73,9 +131,22 @@ async function apiRequest(endpoint, options = {}) {
         }
         
         // Handle other errors
-        const error = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+        let errorData;
+        try {
+            const errorText = await response.text();
+            if (errorText) {
+                errorData = JSON.parse(errorText);
+            } else {
+                errorData = { message: `HTTP ${response.status}` };
+            }
+        } catch {
+            // If JSON parsing fails, create a generic error
+            errorData = { message: `HTTP ${response.status}: ${response.statusText || 'Unknown error'}` };
+        }
         // Error response format: {success: false, error: "error_type", message: "error message"}
-        throw new Error(error.message || `HTTP ${response.status}`);
+        const error = new Error(errorData.message || `HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
     }
 
     // Handle 204 No Content (empty response) - DELETE endpoints typically return this
@@ -266,6 +337,81 @@ async function checkAPIHealth() {
     }
 }
 
+/**
+ * Check extended API health status
+ */
+async function checkExtendedAPIHealth() {
+    // Wait for config to load before making API call
+    if (window.CONFIG_LOADED) {
+        await window.CONFIG_LOADED;
+    }
+    try {
+        const url = `${window.API_BASE_URL}/healthz?mode=extended`;
+        const response = await fetch(url, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000) // 5 second timeout
+        });
+        if (response.ok) {
+            const data = await response.json();
+            return { status: data.status || 'healthy', data };
+        }
+        return { status: 'unhealthy', error: `HTTP ${response.status}` };
+    } catch (error) {
+        return { status: 'offline', error: error.message };
+    }
+}
+
+/**
+ * Get AI context for current user
+ */
+async function getAIContext() {
+    // Wait for config to load before making API call (same pattern as other functions)
+    if (window.CONFIG_LOADED) {
+        await window.CONFIG_LOADED;
+    }
+    return apiRequest('/api/v1/ai/context');
+}
+
+/**
+ * Update AI context for current user
+ */
+async function updateAIContext(contextSummary, preferences = null) {
+    // Wait for config to load before making API call (same as other functions)
+    if (window.CONFIG_LOADED) {
+        await window.CONFIG_LOADED;
+    }
+    
+    const payload = {};
+    // Include context_summary if provided (including empty string)
+    // Empty string is a valid value, so we include it
+    // Note: We always include context_summary if it's explicitly provided (even if empty string)
+    // This allows clearing the context by sending an empty string
+    if (contextSummary !== undefined && contextSummary !== null) {
+        payload.context_summary = contextSummary;
+    }
+    if (preferences !== null) {
+        payload.preferences = preferences;
+    }
+    
+    // Ensure we always send at least one field (backend expects at least one)
+    // If both are missing, send empty context_summary to clear it
+    if (Object.keys(payload).length === 0) {
+        payload.context_summary = '';
+    }
+    
+    return apiRequest('/api/v1/ai/context', {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+    });
+}
+
+/**
+ * Get tag statistics for current user
+ */
+async function getTagStats() {
+    return apiRequest('/api/v1/todos/tags/stats');
+}
+
 // Export functions for ES module use
 export {
     handleAuthError,
@@ -279,7 +425,11 @@ export {
     completeTodo,
     analyzeTodo,
     sendChatMessage,
-    checkAPIHealth
+    checkAPIHealth,
+    checkExtendedAPIHealth,
+    getAIContext,
+    updateAIContext,
+    getTagStats
 };
 
 // Expose functions globally for backward compatibility
@@ -296,4 +446,8 @@ if (typeof window !== 'undefined') {
     window.analyzeTodo = analyzeTodo;
     window.sendChatMessage = sendChatMessage;
     window.checkAPIHealth = checkAPIHealth;
+    window.checkExtendedAPIHealth = checkExtendedAPIHealth;
+    window.getAIContext = getAIContext;
+    window.updateAIContext = updateAIContext;
+    window.getTagStats = getTagStats;
 }

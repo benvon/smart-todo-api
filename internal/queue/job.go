@@ -14,6 +14,8 @@ const (
 	JobTypeTaskAnalysis JobType = "task_analysis"
 	// JobTypeReprocessUser is a job for reprocessing all todos for a user
 	JobTypeReprocessUser JobType = "reprocess_user"
+	// JobTypeTagAnalysis is a job for analyzing and aggregating tag statistics for a user
+	JobTypeTagAnalysis JobType = "tag_analysis"
 )
 
 // Job represents a job in the queue

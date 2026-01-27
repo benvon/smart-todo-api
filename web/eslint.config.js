@@ -42,6 +42,7 @@ export default [
                 AbortSignal: 'readonly',
                 AbortController: 'readonly',
                 EventSource: 'readonly',
+                DOMException: 'readonly',
                 // Node.js globals
                 process: 'readonly',
                 Buffer: 'readonly',

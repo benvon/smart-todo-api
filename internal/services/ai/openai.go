@@ -83,13 +83,14 @@ func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *O
 // AnalyzeTask analyzes a task and returns suggested tags and time horizon
 func (p *OpenAIProvider) AnalyzeTask(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
 	// Use current time as creation time when not provided
-	return p.AnalyzeTaskWithDueDate(ctx, text, nil, time.Now(), userContext)
+	return p.AnalyzeTaskWithDueDate(ctx, text, nil, time.Now(), userContext, nil)
 }
 
 // AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon
-func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
-	// Build prompt with user context, due date, and creation time
-	prompt := p.buildAnalysisPrompt(text, dueDate, createdAt, userContext)
+// tagStats is optional tag statistics to guide tag selection (prefer existing tags)
+func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
+	// Build prompt with user context, due date, creation time, and tag statistics
+	prompt := p.buildAnalysisPrompt(text, dueDate, createdAt, userContext, tagStats)
 
 	// Build messages
 	messages := []openai.ChatCompletionMessageParamUnion{
@@ -258,8 +259,8 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 	return content, nil
 }
 
-// buildAnalysisPrompt builds the prompt for task analysis with time context
-func (p *OpenAIProvider) buildAnalysisPrompt(text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) string {
+// buildAnalysisPrompt builds the prompt for task analysis with time context and tag statistics
+func (p *OpenAIProvider) buildAnalysisPrompt(text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) string {
 	now := time.Now()
 
 	prompt := fmt.Sprintf(`Analyze the following todo item and suggest:
@@ -331,6 +332,51 @@ Use the due date as a strong signal for time horizon categorization. Items with 
 When interpreting relative time expressions in the todo text (like "this weekend", "soon", "next week"), consider when the todo was created. For example, if a todo says "this weekend" and it was created on Monday, "this weekend" refers to the upcoming weekend. If it was created on Saturday, it might refer to today or tomorrow.
 
 Return only valid JSON.`
+
+	// Include tag statistics to guide tag selection
+	if tagStats != nil && len(tagStats.TagStats) > 0 {
+		prompt += "\n\nExisting tags (prefer reusing these when semantically similar):"
+		
+		// Sort tags by total count (most used first) for better guidance
+		type tagEntry struct {
+			tag   string
+			total int
+		}
+		tagList := make([]tagEntry, 0, len(tagStats.TagStats))
+		for tag, stats := range tagStats.TagStats {
+			tagList = append(tagList, tagEntry{tag: tag, total: stats.Total})
+		}
+		
+		// Simple sort by total count (descending)
+		for i := 0; i < len(tagList)-1; i++ {
+			for j := i + 1; j < len(tagList); j++ {
+				if tagList[i].total < tagList[j].total {
+					tagList[i], tagList[j] = tagList[j], tagList[i]
+				}
+			}
+		}
+		
+		// Format tag list (limit to top 50 to avoid prompt bloat)
+		maxTags := 50
+		if len(tagList) > maxTags {
+			tagList = tagList[:maxTags]
+		}
+		
+		for _, entry := range tagList {
+			stats := tagStats.TagStats[entry.tag]
+			prompt += fmt.Sprintf("\n- %s (used %d times", entry.tag, stats.Total)
+			if stats.AI > 0 || stats.User > 0 {
+				prompt += fmt.Sprintf(", %d AI-generated, %d user-defined", stats.AI, stats.User)
+			}
+			prompt += ")"
+		}
+		
+		prompt += "\n\nTag selection guidance:"
+		prompt += "\n- Prefer reusing existing tags when they are semantically similar or closely related to the todo item"
+		prompt += "\n- Only create new tags if no existing tag is a good match (consider synonyms, related concepts, and variations)"
+		prompt += "\n- When an existing tag is close enough, use it rather than creating a new one"
+		prompt += "\n- This helps maintain consistency and reduces tag proliferation"
+	}
 
 	if userContext != nil && userContext.ContextSummary != "" {
 		prompt += "\n\nUser preferences: " + userContext.ContextSummary

@@ -24,7 +24,8 @@ type AIProviderWithDueDate interface {
 	AIProvider
 	// AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon
 	// createdAt is when the todo was created/entered, used for understanding relative time expressions
-	AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
+	// tagStats is optional tag statistics to guide tag selection (prefer existing tags)
+	AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error)
 }
 
 // ChatMessage represents a message in a chat conversation

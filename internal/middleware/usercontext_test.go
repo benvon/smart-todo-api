@@ -80,8 +80,3 @@ func TestUserFromContext(t *testing.T) {
 		})
 	}
 }
-
-// Helper function for testing - sets user in context
-func SetUserInContext(ctx context.Context, user *models.User) context.Context {
-	return context.WithValue(ctx, userContextKey, user)
-}

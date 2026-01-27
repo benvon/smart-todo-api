@@ -32,4 +32,7 @@ type JobQueue interface {
 
 	// Close closes the queue connection
 	Close() error
+
+	// HealthCheck verifies the queue connection is healthy
+	HealthCheck(ctx context.Context) error
 }

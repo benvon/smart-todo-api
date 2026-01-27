@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 type mockAIProvider struct {
 	t                          *testing.T
 	analyzeTaskFunc            func(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
-	analyzeTaskWithDueDateFunc func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error)
+	analyzeTaskWithDueDateFunc func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error)
 	
 	// Call tracking
 	analyzeTaskCalls            []struct{ text string; userContext *models.AIContext }
@@ -32,7 +33,7 @@ func (m *mockAIProvider) AnalyzeTask(ctx context.Context, text string, userConte
 	return m.analyzeTaskFunc(ctx, text, userContext)
 }
 
-func (m *mockAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+func (m *mockAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 	m.analyzeTaskWithDueDateCalls = append(m.analyzeTaskWithDueDateCalls, struct{ text string; dueDate *time.Time; createdAt time.Time; userContext *models.AIContext }{text, dueDate, createdAt, userContext})
 	if m.analyzeTaskWithDueDateFunc == nil {
 		// Fallback to analyzeTaskFunc if available
@@ -41,7 +42,7 @@ func (m *mockAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 		}
 		m.t.Fatal("AnalyzeTaskWithDueDate called but not configured in test - mock requires explicit setup")
 	}
-	return m.analyzeTaskWithDueDateFunc(ctx, text, dueDate, createdAt, userContext)
+	return m.analyzeTaskWithDueDateFunc(ctx, text, dueDate, createdAt, userContext, tagStats)
 }
 
 func (m *mockAIProvider) Chat(ctx context.Context, messages []ai.ChatMessage, userContext *models.AIContext) (*ai.ChatResponse, error) {
@@ -62,14 +63,27 @@ type mockTodoRepo struct {
 	updateFunc                func(ctx context.Context, todo *models.Todo) error
 	getByUserIDPaginatedFunc  func(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error)
 	
-	// Call tracking
+	// Call tracking (protected by mutex for concurrent access)
+	mu                        sync.Mutex
 	getByIDCalls              []uuid.UUID
 	updateCalls               []*models.Todo
 	getByUserIDPaginatedCalls []struct{ userID uuid.UUID; timeHorizon *models.TimeHorizon; status *models.TodoStatus; page, pageSize int }
 }
 
+// SetTagStatsRepo is a no-op for the mock (tag change detection handled by concrete implementation)
+func (m *mockTodoRepo) SetTagStatsRepo(repo database.TagStatisticsRepositoryInterface) {
+	// No-op for mock
+}
+
+// SetTagChangeHandler is a no-op for the mock (tag change detection handled by concrete implementation)
+func (m *mockTodoRepo) SetTagChangeHandler(handler database.TagChangeHandler) {
+	// No-op for mock
+}
+
 func (m *mockTodoRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
+	m.mu.Lock()
 	m.getByIDCalls = append(m.getByIDCalls, id)
+	m.mu.Unlock()
 	if m.getByIDFunc == nil {
 		m.t.Fatal("GetByID called but not configured in test - mock requires explicit setup")
 	}
@@ -77,7 +91,9 @@ func (m *mockTodoRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Todo,
 }
 
 func (m *mockTodoRepo) Update(ctx context.Context, todo *models.Todo) error {
+	m.mu.Lock()
 	m.updateCalls = append(m.updateCalls, todo)
+	m.mu.Unlock()
 	if m.updateFunc == nil {
 		m.t.Fatal("Update called but not configured in test - mock requires explicit setup")
 	}
@@ -85,7 +101,9 @@ func (m *mockTodoRepo) Update(ctx context.Context, todo *models.Todo) error {
 }
 
 func (m *mockTodoRepo) GetByUserIDPaginated(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error) {
+	m.mu.Lock()
 	m.getByUserIDPaginatedCalls = append(m.getByUserIDPaginatedCalls, struct{ userID uuid.UUID; timeHorizon *models.TimeHorizon; status *models.TodoStatus; page, pageSize int }{userID, timeHorizon, status, page, pageSize})
+	m.mu.Unlock()
 	if m.getByUserIDPaginatedFunc == nil {
 		m.t.Fatal("GetByUserIDPaginated called but not configured in test - mock requires explicit setup")
 	}
@@ -181,6 +199,10 @@ func (m *mockJobQueue) Close() error {
 	return nil
 }
 
+func (m *mockJobQueue) HealthCheck(ctx context.Context) error {
+	return nil
+}
+
 // Ensure mock implements interface
 var _ queue.JobQueue = (*mockJobQueue)(nil)
 
@@ -235,7 +257,7 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work", "urgent"}, models.TimeHorizonSoon, nil
 					},
 				}
@@ -263,6 +285,52 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 				}
 				if todo.TimeHorizon != models.TimeHorizonSoon {
 					t.Errorf("Expected time horizon to be soon, got %s", todo.TimeHorizon)
+				}
+			},
+		},
+		{
+			name: "preserves user-set time horizon",
+			job: &queue.Job{
+				ID:     uuid.New(),
+				Type:   queue.JobTypeTaskAnalysis,
+				UserID: userID,
+				TodoID: &todoID,
+			},
+			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
+				aiProvider := &mockAIProvider{
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
+						// AI suggests "later" but user has set it to "next"
+						return []string{"work"}, models.TimeHorizonLater, nil
+					},
+				}
+				override := true
+				todoRepo := &mockTodoRepo{
+					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
+						return &models.Todo{
+							ID:          id,
+							UserID:      userID,
+							Text:        "Complete project",
+							Status:      models.TodoStatusPending,
+							TimeHorizon: models.TimeHorizonNext, // User set this
+							Metadata: models.Metadata{
+								TimeHorizonUserOverride: &override, // User override flag set
+							},
+						}, nil
+					},
+					updateFunc: func(ctx context.Context, todo *models.Todo) error {
+						return nil
+					},
+				}
+				return aiProvider, todoRepo, &mockAIContextRepo{}, &mockUserActivityRepo{}, &mockJobQueue{}
+			},
+			expectError: false,
+			validateTodo: func(t *testing.T, todo *models.Todo) {
+				// Should preserve user-set time horizon even though AI suggests different
+				if todo.TimeHorizon != models.TimeHorizonNext {
+					t.Errorf("Expected time horizon to be preserved as 'next' (user-set), got %s", todo.TimeHorizon)
+				}
+				if todo.Status != models.TodoStatusProcessed {
+					t.Errorf("Expected status to be processed, got %s", todo.Status)
 				}
 			},
 		},
@@ -363,7 +431,7 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return nil, "", errors.New("analysis failed")
 					},
 				}
@@ -405,6 +473,7 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 				todoRepo,
 				contextRepo,
 				activityRepo,
+				nil, // tagStatsRepo - not needed for this test
 				jobQueue,
 			)
 
@@ -422,6 +491,20 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 			} else {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
+				}
+				
+				// Validate todo if validation function provided
+				if tt.validateTodo != nil {
+					// Get the updated todo from the last update call
+					todoRepo.mu.Lock()
+					if len(todoRepo.updateCalls) > 0 {
+						updatedTodo := todoRepo.updateCalls[len(todoRepo.updateCalls)-1]
+						todoRepo.mu.Unlock()
+						tt.validateTodo(t, updatedTodo)
+					} else {
+						todoRepo.mu.Unlock()
+						t.Error("Expected Update to be called but it wasn't")
+					}
 				}
 			}
 		})
@@ -450,7 +533,7 @@ func TestTaskAnalyzer_ProcessJob(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work"}, models.TimeHorizonNext, nil
 					},
 				}
@@ -480,7 +563,7 @@ func TestTaskAnalyzer_ProcessJob(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work"}, models.TimeHorizonNext, nil
 					},
 				}
@@ -540,6 +623,7 @@ func TestTaskAnalyzer_ProcessJob(t *testing.T) {
 				todoRepo,
 				contextRepo,
 				activityRepo,
+				nil, // tagStatsRepo - not needed for this test
 				jobQueue,
 			)
 
@@ -601,7 +685,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work"}, models.TimeHorizonSoon, nil
 					},
 				}
@@ -645,7 +729,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work"}, models.TimeHorizonSoon, nil
 					},
 				}
@@ -689,7 +773,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work"}, models.TimeHorizonSoon, nil
 					},
 				}
@@ -736,7 +820,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				aiProvider := &mockAIProvider{
-					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+					analyzeTaskWithDueDateFunc: func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 						return []string{"work"}, models.TimeHorizonSoon, nil
 					},
 				}
@@ -786,10 +870,10 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 			
 			// Wrap the analyzeTaskWithDueDateFunc to capture createdAt
 			originalFunc := aiProvider.analyzeTaskWithDueDateFunc
-			aiProvider.analyzeTaskWithDueDateFunc = func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
+			aiProvider.analyzeTaskWithDueDateFunc = func(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
 				capturedCreatedAt = createdAt
 				if originalFunc != nil {
-					return originalFunc(ctx, text, dueDate, createdAt, userContext)
+					return originalFunc(ctx, text, dueDate, createdAt, userContext, tagStats)
 				}
 				return []string{"work"}, models.TimeHorizonSoon, nil
 			}
@@ -799,6 +883,7 @@ func TestTaskAnalyzer_TimeContext(t *testing.T) {
 				todoRepo,
 				contextRepo,
 				activityRepo,
+				nil, // tagStatsRepo - not needed for this test
 				jobQueue,
 			)
 

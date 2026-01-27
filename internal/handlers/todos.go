@@ -20,8 +20,9 @@ import (
 
 // TodoHandler handles todo-related requests
 type TodoHandler struct {
-	todoRepo *database.TodoRepository
-	jobQueue queue.JobQueue // Optional - if nil, job enqueueing is disabled
+	todoRepo     *database.TodoRepository
+	tagStatsRepo database.TagStatisticsRepositoryInterface
+	jobQueue     queue.JobQueue // Optional - if nil, job enqueueing is disabled
 }
 
 // NewTodoHandler creates a new todo handler
@@ -37,11 +38,21 @@ func NewTodoHandlerWithQueue(todoRepo *database.TodoRepository, jobQueue queue.J
 	}
 }
 
+// NewTodoHandlerWithQueueAndTagStats creates a new todo handler with job queue and tag statistics support
+func NewTodoHandlerWithQueueAndTagStats(todoRepo *database.TodoRepository, tagStatsRepo database.TagStatisticsRepositoryInterface, jobQueue queue.JobQueue) *TodoHandler {
+	return &TodoHandler{
+		todoRepo:     todoRepo,
+		tagStatsRepo: tagStatsRepo,
+		jobQueue:     jobQueue,
+	}
+}
+
 // RegisterRoutes registers todo routes on the given router
 // The router should already have the /todos prefix (e.g., from apiRouter.PathPrefix("/todos"))
 func (h *TodoHandler) RegisterRoutes(r *mux.Router) {
 	r.HandleFunc("", h.ListTodos).Methods("GET")
 	r.HandleFunc("", h.CreateTodo).Methods("POST")
+	r.HandleFunc("/tags/stats", h.GetTagStats).Methods("GET")
 	r.HandleFunc("/{id}", h.GetTodo).Methods("GET")
 	r.HandleFunc("/{id}", h.UpdateTodo).Methods("PATCH")
 	r.HandleFunc("/{id}", h.DeleteTodo).Methods("DELETE")
@@ -234,6 +245,7 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue AI analysis job if job queue is available
+	// Note: Tag change detection is handled automatically by the repository
 	if h.jobQueue != nil {
 		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
 		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
@@ -327,6 +339,7 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update fields if provided with validation
+	// Note: Tag change detection is handled automatically by the repository
 	if req.Text != nil {
 		// Sanitize text input
 		sanitized := validation.SanitizeText(*req.Text)
@@ -348,6 +361,9 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		}
 		// User explicitly setting time horizon - mark as user override
 		todo.TimeHorizon = *req.TimeHorizon
+		// Mark that user has manually set the time horizon
+		override := true
+		todo.Metadata.TimeHorizonUserOverride = &override
 	}
 	if req.Status != nil {
 		// Validate enum value
@@ -380,6 +396,8 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to update todo")
 		return
 	}
+
+	// Note: Tag change detection is handled automatically by the repository
 
 	respondJSON(w, http.StatusOK, todo)
 }
@@ -509,4 +527,37 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 	// Job queue not available
 	log.Printf("Job queue not available - AI analysis requested for todo %s (user %s)", todo.ID, user.ID)
 	respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "AI analysis is not available")
+}
+
+// TagStatsResponse represents the response for tag statistics
+type TagStatsResponse struct {
+	TagStats       map[string]models.TagStats `json:"tag_stats"`
+	Tainted        bool                       `json:"tainted"`
+	LastAnalyzedAt *time.Time                 `json:"last_analyzed_at,omitempty"`
+}
+
+// GetTagStats returns tag statistics for the authenticated user
+func (h *TodoHandler) GetTagStats(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFromContext(r)
+	if user == nil {
+		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get tag statistics (or create if doesn't exist)
+	stats, err := h.tagStatsRepo.GetByUserIDOrCreate(ctx, user.ID)
+	if err != nil {
+		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve tag statistics")
+		return
+	}
+
+	response := TagStatsResponse{
+		TagStats:       stats.TagStats,
+		Tainted:         stats.Tainted,
+		LastAnalyzedAt: stats.LastAnalyzedAt,
+	}
+
+	respondJSON(w, http.StatusOK, response)
 }

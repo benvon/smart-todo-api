@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,14 +17,29 @@ const (
 	MaxPageSize = 500
 )
 
+// TagChangeHandler handles tag change events (callback to avoid circular dependencies)
+type TagChangeHandler func(ctx context.Context, userID uuid.UUID) error
+
 // TodoRepository handles todo database operations
 type TodoRepository struct {
-	db *DB
+	db                *DB
+	tagStatsRepo      TagStatisticsRepositoryInterface // Optional: for automatic tag change detection
+	tagChangeHandler  TagChangeHandler                 // Optional: callback when tags change
 }
 
 // NewTodoRepository creates a new todo repository
 func NewTodoRepository(db *DB) *TodoRepository {
 	return &TodoRepository{db: db}
+}
+
+// SetTagChangeHandler sets a callback to be invoked when tags change
+func (r *TodoRepository) SetTagChangeHandler(handler TagChangeHandler) {
+	r.tagChangeHandler = handler
+}
+
+// SetTagStatsRepo sets the tag statistics repository for automatic tag change detection
+func (r *TodoRepository) SetTagStatsRepo(repo TagStatisticsRepositoryInterface) {
+	r.tagStatsRepo = repo
 }
 
 // Create creates a new todo
@@ -232,6 +248,40 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 
 // Update updates an existing todo
 func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
+	// Detect tag changes if tag statistics support is enabled
+	var oldTags []string
+	var newTags []string
+	var tagsChanged bool
+	if r.tagStatsRepo != nil {
+		// Load existing todo to compare tags
+		existing, err := r.GetByID(ctx, todo.ID)
+		if err == nil {
+			// Normalize nil slices to empty slices for comparison
+			if existing.Metadata.CategoryTags == nil {
+				oldTags = []string{}
+			} else {
+				oldTags = existing.Metadata.CategoryTags
+			}
+			if todo.Metadata.CategoryTags == nil {
+				newTags = []string{}
+			} else {
+				newTags = todo.Metadata.CategoryTags
+			}
+			tagsChanged = !tagsEqual(oldTags, newTags)
+			if tagsChanged {
+				log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, newTags)
+			} else {
+				log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, newTags)
+			}
+		} else {
+			// If GetByID fails, we can't compare tags, so we'll skip tag change detection
+			// This might happen if the todo was just created and hasn't been persisted yet
+			log.Printf("Could not load existing todo %s for tag comparison: %v (skipping tag change detection)", todo.ID, err)
+		}
+	} else {
+		log.Printf("Tag stats repo not configured for todo repository, skipping tag change detection")
+	}
+
 	query := `
 		UPDATE todos
 		SET text = $2, time_horizon = $3, status = $4, metadata = $5, due_date = $6, updated_at = $7, completed_at = $8
@@ -272,9 +322,68 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
 	if err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
+
+	// If tags changed, invoke the tag change handler
+	if tagsChanged && r.tagChangeHandler != nil {
+		log.Printf("Invoking tag change handler for user %s (todo %s)", todo.UserID, todo.ID)
+		if err := r.tagChangeHandler(ctx, todo.UserID); err != nil {
+			// Log error but don't fail the update
+			// Tag analysis can happen later
+			log.Printf("Tag change handler failed for user %s: %v", todo.UserID, err)
+		} else {
+			log.Printf("Tag change handler completed successfully for user %s", todo.UserID)
+		}
+	} else if tagsChanged && r.tagChangeHandler == nil {
+		log.Printf("Tags changed for todo %s but no tag change handler configured", todo.ID)
+	}
 	
 	return nil
 }
+
+// tagsEqual compares two tag slices for equality (order-independent)
+// Handles nil slices as empty slices
+func tagsEqual(a, b []string) bool {
+	// Normalize nil to empty slice
+	if a == nil {
+		a = []string{}
+	}
+	if b == nil {
+		b = []string{}
+	}
+	
+	if len(a) != len(b) {
+		return false
+	}
+	
+	// Both empty - equal
+	if len(a) == 0 {
+		return true
+	}
+	
+	// Create maps for O(n) comparison
+	mapA := make(map[string]int)
+	mapB := make(map[string]int)
+	
+	for _, tag := range a {
+		mapA[tag]++
+	}
+	for _, tag := range b {
+		mapB[tag]++
+	}
+	
+	if len(mapA) != len(mapB) {
+		return false
+	}
+	
+	for tag, count := range mapA {
+		if mapB[tag] != count {
+			return false
+		}
+	}
+	
+	return true
+}
+
 
 // Delete deletes a todo by ID
 func (r *TodoRepository) Delete(ctx context.Context, id uuid.UUID) error {

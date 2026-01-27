@@ -74,6 +74,23 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 			},
 			jsonStr: `{"category_tags":["work"],"priority":"high","context":["home"],"duration":"30m","time_entered":"2024-03-15T14:30:00Z"}`,
 		},
+		{
+			name: "with time_horizon_user_override",
+			metadata: Metadata{
+				TimeHorizonUserOverride: boolPtr(true),
+			},
+			jsonStr: `{"time_horizon_user_override":true}`,
+		},
+		{
+			name: "all fields including time_horizon_user_override",
+			metadata: Metadata{
+				CategoryTags:          []string{"work"},
+				Priority:              stringPtr("high"),
+				TimeEntered:           stringPtr("2024-03-15T14:30:00Z"),
+				TimeHorizonUserOverride: boolPtr(true),
+			},
+			jsonStr: `{"category_tags":["work"],"priority":"high","time_entered":"2024-03-15T14:30:00Z","time_horizon_user_override":true}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -118,6 +135,10 @@ func TestMetadata_JSONSerialization(t *testing.T) {
 
 func stringPtr(s string) *string {
 	return &s
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 func mapsEqual(a, b map[string]any) bool {
@@ -195,6 +216,13 @@ func metadataEqual(a, b Metadata) bool {
 		return false
 	}
 	if a.TimeEntered != nil && b.TimeEntered != nil && *a.TimeEntered != *b.TimeEntered {
+		return false
+	}
+
+	if (a.TimeHorizonUserOverride == nil) != (b.TimeHorizonUserOverride == nil) {
+		return false
+	}
+	if a.TimeHorizonUserOverride != nil && b.TimeHorizonUserOverride != nil && *a.TimeHorizonUserOverride != *b.TimeHorizonUserOverride {
 		return false
 	}
 

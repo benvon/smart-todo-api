@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,12 +24,15 @@ type mockJobQueueForReprocessor struct {
 	t           *testing.T
 	enqueueFunc func(ctx context.Context, job *queue.Job) error
 	
-	// Call tracking
+	// Call tracking (protected by mutex for concurrent access)
+	mu          sync.Mutex
 	enqueueCalls []*queue.Job
 }
 
 func (m *mockJobQueueForReprocessor) Enqueue(ctx context.Context, job *queue.Job) error {
+	m.mu.Lock()
 	m.enqueueCalls = append(m.enqueueCalls, job)
+	m.mu.Unlock()
 	if m.enqueueFunc == nil {
 		m.t.Fatal("Enqueue called but not configured in test - mock requires explicit setup")
 	}
@@ -47,6 +51,10 @@ func (m *mockJobQueueForReprocessor) Close() error {
 	return nil
 }
 
+func (m *mockJobQueueForReprocessor) HealthCheck(ctx context.Context) error {
+	return nil
+}
+
 // Ensure mock implements interface
 var _ queue.JobQueue = (*mockJobQueueForReprocessor)(nil)
 
@@ -56,13 +64,16 @@ type mockUserActivityRepoForReprocessor struct {
 	getByUserIDFunc                    func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
 	getEligibleUsersForReprocessingFunc func(ctx context.Context) ([]uuid.UUID, error)
 	
-	// Call tracking
+	// Call tracking (protected by mutex for concurrent access)
+	mu                                  sync.Mutex
 	getByUserIDCalls                    []uuid.UUID
 	getEligibleUsersForReprocessingCalls int
 }
 
 func (m *mockUserActivityRepoForReprocessor) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error) {
+	m.mu.Lock()
 	m.getByUserIDCalls = append(m.getByUserIDCalls, userID)
+	m.mu.Unlock()
 	if m.getByUserIDFunc == nil {
 		m.t.Fatal("GetByUserID called but not configured in test - mock requires explicit setup")
 	}
@@ -70,7 +81,9 @@ func (m *mockUserActivityRepoForReprocessor) GetByUserID(ctx context.Context, us
 }
 
 func (m *mockUserActivityRepoForReprocessor) GetEligibleUsersForReprocessing(ctx context.Context) ([]uuid.UUID, error) {
+	m.mu.Lock()
 	m.getEligibleUsersForReprocessingCalls++
+	m.mu.Unlock()
 	if m.getEligibleUsersForReprocessingFunc == nil {
 		m.t.Fatal("GetEligibleUsersForReprocessing called but not configured in test - mock requires explicit setup")
 	}
@@ -375,8 +388,17 @@ func TestReprocessor_createReprocessingJob(t *testing.T) {
 					t.Errorf("Unexpected error: %v", err)
 				}
 				// Validate job was created correctly if validateJob is provided
-				if tt.validateJob != nil && len(jobQueue.enqueueCalls) > 0 {
-					tt.validateJob(t, jobQueue.enqueueCalls[0])
+				if tt.validateJob != nil {
+					jobQueue.mu.Lock()
+					enqueueCallsCount := len(jobQueue.enqueueCalls)
+					var firstJob *queue.Job
+					if enqueueCallsCount > 0 {
+						firstJob = jobQueue.enqueueCalls[0]
+					}
+					jobQueue.mu.Unlock()
+					if enqueueCallsCount > 0 {
+						tt.validateJob(t, firstJob)
+					}
 				}
 			}
 		})

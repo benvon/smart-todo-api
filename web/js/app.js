@@ -1,9 +1,10 @@
 // Main application logic
 
-import { handleCallback, initiateLogin, isAuthenticated, logout } from './auth.js';
-import { checkAPIHealth, getTodos, createTodo, updateTodo, deleteTodo, completeTodo, analyzeTodo } from './api.js';
+import { handleCallback, initiateLogin, isAuthenticated } from './auth.js';
+import { checkAPIHealth, checkExtendedAPIHealth, getTodos, createTodo, updateTodo, deleteTodo, completeTodo, analyzeTodo } from './api.js';
 import { parseNaturalDate, extractDateFromText, formatDate } from './dateutils.js';
 import { initChat } from './chat.js';
+import { initProfile } from './profile.js';
 import logger from './logger.js';
 
 let todos = [];
@@ -33,11 +34,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
     
-    // Setup logout button
-    const logoutButton = document.getElementById('logout-button');
-    if (logoutButton) {
-        logoutButton.addEventListener('click', logout);
-    }
+    // Initialize profile panel
+    initProfile();
     
     // Setup todo input
     const todoInput = document.getElementById('todo-input');
@@ -68,6 +66,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Initialize API status indicator
     await updateAPIStatus();
     setInterval(updateAPIStatus, 10000); // Update every 10 seconds
+    
+    // Initialize API status dropdown
+    initAPIStatusDropdown();
     
     // Initialize chat
     initChat();
@@ -114,6 +115,106 @@ async function updateAPIStatus() {
         statusIndicator.className = 'api-status-indicator status-offline';
         statusText.textContent = 'API Offline';
     }
+}
+
+/**
+ * Initialize API status dropdown
+ */
+function initAPIStatusDropdown() {
+    const apiStatus = document.getElementById('api-status');
+    const dropdown = document.getElementById('api-status-dropdown');
+    let refreshInterval = null;
+    
+    if (!apiStatus || !dropdown) {
+        return;
+    }
+    
+    // Toggle dropdown on click
+    apiStatus.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = dropdown.style.display !== 'none';
+        
+        if (isVisible) {
+            // Close dropdown
+            dropdown.style.display = 'none';
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        } else {
+            // Open dropdown
+            dropdown.style.display = 'block';
+            updateExtendedStatus();
+            // Refresh every 2 seconds when open
+            refreshInterval = setInterval(updateExtendedStatus, 2000);
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!apiStatus.contains(e.target)) {
+            dropdown.style.display = 'none';
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+    });
+    
+    // Prevent dropdown clicks from closing it
+    dropdown.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+}
+
+/**
+ * Update extended API status in dropdown
+ */
+async function updateExtendedStatus() {
+    const dropdownContent = document.getElementById('api-status-dropdown-content');
+    if (!dropdownContent) {
+        return;
+    }
+    
+    try {
+        const health = await checkExtendedAPIHealth();
+        
+        let html = '';
+        html += `<div class="api-status-detail"><strong>Status:</strong> <span class="status-${health.status}">${health.status}</span></div>`;
+        
+        if (health.data && health.data.timestamp) {
+            html += `<div class="api-status-detail"><strong>Timestamp:</strong> ${new Date(health.data.timestamp).toLocaleString()}</div>`;
+        }
+        
+        if (health.data && health.data.checks) {
+            html += '<div class="api-status-detail"><strong>Checks:</strong></div>';
+            html += '<div class="api-status-checks">';
+            for (const [checkName, checkStatus] of Object.entries(health.data.checks)) {
+                html += `<div class="api-status-check-item">
+                    <span class="check-name">${escapeHtml(checkName)}:</span>
+                    <span class="check-status status-${checkStatus}">${escapeHtml(checkStatus)}</span>
+                </div>`;
+            }
+            html += '</div>';
+        }
+        
+        if (health.error) {
+            html += `<div class="api-status-detail error"><strong>Error:</strong> ${escapeHtml(health.error)}</div>`;
+        }
+        
+        dropdownContent.innerHTML = html;
+    } catch (error) {
+        dropdownContent.innerHTML = `<div class="api-status-detail error">Failed to load extended status: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 /**
@@ -357,6 +458,13 @@ function renderTodos() {
     const soonList = document.getElementById('todos-soon');
     const laterList = document.getElementById('todos-later');
     
+    // Check if any todo is in edit mode - if so, don't re-render
+    const editModeTodos = document.querySelectorAll('.todo-item.todo-edit-mode');
+    if (editModeTodos.length > 0) {
+        // Skip re-rendering if any todo is being edited
+        return;
+    }
+    
     // Clear existing todos
     [nextList, soonList, laterList].forEach(list => {
         if (list) {
@@ -470,6 +578,16 @@ function renderTodoList(container, todoList, timeHorizon) {
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'todo-actions';
         
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-small btn-secondary';
+        editBtn.textContent = 'Edit';
+        editBtn.disabled = todo.status === 'completed';
+        editBtn.setAttribute('draggable', 'false');
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleEditTodo(todo.id, todoEl, todo);
+        });
+        
         const completeBtn = document.createElement('button');
         completeBtn.className = 'btn btn-small btn-complete';
         completeBtn.textContent = 'Complete';
@@ -489,6 +607,7 @@ function renderTodoList(container, todoList, timeHorizon) {
             handleDeleteTodo(todo.id);
         });
         
+        actionsDiv.appendChild(editBtn);
         actionsDiv.appendChild(completeBtn);
         actionsDiv.appendChild(deleteBtn);
         
@@ -730,7 +849,8 @@ async function handleEditDueDate(id, element, currentDueDate) {
         }
     };
     
-    input.addEventListener('blur', finishEdit);
+    // Remove blur handler - use explicit Enter/Escape keys instead
+    // This prevents cards from closing when clicking on buttons/fields
     input.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             finishEdit();
@@ -747,6 +867,231 @@ async function handleEditDueDate(id, element, currentDueDate) {
             input.replaceWith(newElement);
         }
     });
+}
+
+/**
+ * Handle editing a todo
+ */
+async function handleEditTodo(id, todoEl, todo) {
+    // Store original content
+    const originalText = todo.text;
+    const originalTags = todo.metadata?.category_tags ? [...todo.metadata.category_tags] : [];
+    const originalTagSources = todo.metadata?.tag_sources ? { ...todo.metadata.tag_sources } : {};
+    const originalDueDate = todo.due_date;
+
+    // Create edit mode UI
+    todoEl.classList.add('todo-edit-mode');
+    todoEl.innerHTML = '';
+
+    // Edit text input
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.className = 'todo-edit-text';
+    textInput.value = originalText;
+    textInput.placeholder = 'Todo text...';
+    todoEl.appendChild(textInput);
+
+    // Tags editor
+    const tagsContainer = document.createElement('div');
+    tagsContainer.className = 'todo-tags-edit';
+    
+    const tagsLabel = document.createElement('label');
+    tagsLabel.textContent = 'Tags:';
+    tagsLabel.style.display = 'block';
+    tagsLabel.style.marginBottom = '5px';
+    tagsLabel.style.fontWeight = '500';
+    tagsContainer.appendChild(tagsLabel);
+
+    const tagsDiv = document.createElement('div');
+    tagsDiv.style.display = 'flex';
+    tagsDiv.style.flexWrap = 'wrap';
+    tagsDiv.style.gap = '6px';
+    tagsDiv.style.marginBottom = '10px';
+
+    // Render existing tags
+    originalTags.forEach(tag => {
+        const tagChip = createTagChip(tag, originalTagSources[tag] === 'ai', () => {
+            // Remove tag handler
+            const index = originalTags.indexOf(tag);
+            if (index > -1) {
+                originalTags.splice(index, 1);
+                delete originalTagSources[tag];
+                renderTagsEditor(tagsDiv, originalTags, originalTagSources);
+            }
+        });
+        tagsDiv.appendChild(tagChip);
+    });
+
+    // Add tag input
+    const addTagInput = document.createElement('input');
+    addTagInput.type = 'text';
+    addTagInput.className = 'todo-tags-input';
+    addTagInput.placeholder = 'Add tag...';
+    addTagInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            const tagName = addTagInput.value.trim();
+            if (tagName && !originalTags.includes(tagName)) {
+                originalTags.push(tagName);
+                originalTagSources[tagName] = 'user';
+                addTagInput.value = '';
+                renderTagsEditor(tagsDiv, originalTags, originalTagSources);
+            }
+        }
+    });
+    tagsDiv.appendChild(addTagInput);
+    tagsContainer.appendChild(tagsDiv);
+
+    // Due date editor
+    const dueDateContainer = document.createElement('div');
+    dueDateContainer.style.marginBottom = '10px';
+    const dueDateLabel = document.createElement('label');
+    dueDateLabel.textContent = 'Due Date:';
+    dueDateLabel.style.display = 'block';
+    dueDateLabel.style.marginBottom = '5px';
+    dueDateLabel.style.fontWeight = '500';
+    dueDateContainer.appendChild(dueDateLabel);
+    
+    const dueDateInput = document.createElement('input');
+    dueDateInput.type = 'text';
+    dueDateInput.className = 'todo-edit-text';
+    dueDateInput.value = originalDueDate ? formatDate(originalDueDate) : '';
+    dueDateInput.placeholder = 'e.g., tomorrow at 3pm, next Friday';
+    dueDateContainer.appendChild(dueDateInput);
+
+    // Action buttons
+    const editActions = document.createElement('div');
+    editActions.className = 'todo-edit-actions';
+    
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-small btn-primary todo-edit-button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', async () => {
+        await saveTodoEdit(id, textInput.value, originalTags, dueDateInput.value, todoEl);
+    });
+    
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-small btn-secondary todo-edit-button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+        // Remove edit mode class before reloading so renderTodos() will actually re-render
+        todoEl.classList.remove('todo-edit-mode');
+        // Re-render todo to exit edit mode
+        loadTodos();
+    });
+    
+    editActions.appendChild(saveBtn);
+    editActions.appendChild(cancelBtn);
+
+    todoEl.appendChild(tagsContainer);
+    todoEl.appendChild(dueDateContainer);
+    todoEl.appendChild(editActions);
+
+    // Focus text input
+    textInput.focus();
+    textInput.select();
+
+    // Helper function to render tags editor
+    function renderTagsEditor(container, tags, tagSources) {
+        container.innerHTML = '';
+        tags.forEach(tag => {
+            const tagChip = createTagChip(tag, tagSources[tag] === 'ai', () => {
+                const index = tags.indexOf(tag);
+                if (index > -1) {
+                    tags.splice(index, 1);
+                    delete tagSources[tag];
+                    renderTagsEditor(container, tags, tagSources);
+                }
+            });
+            container.appendChild(tagChip);
+        });
+        container.appendChild(addTagInput);
+    }
+}
+
+/**
+ * Create a tag chip element
+ */
+function createTagChip(tagName, isAI, onRemove) {
+    const chip = document.createElement('span');
+    chip.className = `tag-chip ${isAI ? 'tag-ai' : 'tag-user'}`;
+    chip.textContent = tagName;
+    
+    // Allow removing all tags in edit mode (both AI and user tags)
+    const removeBtn = document.createElement('span');
+    removeBtn.className = 'tag-chip-remove';
+    removeBtn.textContent = ' ×';
+    removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        onRemove();
+    });
+    chip.appendChild(removeBtn);
+    
+    return chip;
+}
+
+/**
+ * Save todo edits
+ */
+async function saveTodoEdit(id, text, tags, dueDateText, todoEl) {
+    try {
+        const updates = {};
+        
+        // Update text if changed
+        if (text.trim()) {
+            updates.text = text.trim();
+        }
+        
+        // Update tags
+        updates.tags = tags;
+        
+        // Update due date
+        if (dueDateText.trim()) {
+            const parsedDate = parseNaturalDate(dueDateText.trim());
+            if (parsedDate) {
+                // parseNaturalDate already returns an ISO string, so use it directly
+                updates.due_date = parsedDate;
+            } else {
+                showError(`Invalid due date format: "${dueDateText}". Try formats like "tomorrow at 3pm", "next Friday", or "2024-03-15T14:30:00Z"`);
+                return;
+            }
+        } else {
+            updates.due_date = '';
+        }
+        
+        // Update todo
+        await updateTodo(id, updates);
+        
+        // Optimistically set status to processing before triggering reprocessing
+        // This ensures the UI shows "processing" immediately
+        const todo = todos.find(t => t.id === id);
+        if (todo) {
+            todo.status = 'processing';
+            // Remove edit mode class and re-render to show processing status
+            if (todoEl) {
+                todoEl.classList.remove('todo-edit-mode');
+            }
+            renderTodos();
+        }
+        
+        // Trigger reprocessing
+        try {
+            await analyzeTodo(id);
+        } catch (error) {
+            logger.error('Failed to trigger reprocessing:', error);
+            // Don't fail the save if reprocessing fails
+        }
+        
+        // Reload todos after a short delay to get the updated state from server
+        // This gives the worker time to pick up the job
+        setTimeout(async () => {
+            await loadTodos();
+        }, 500);
+    } catch (error) {
+        logger.error('Failed to save todo edit:', error);
+        if (!error.isAuthError) {
+            showError(error.message || 'Failed to save todo. Please try again.');
+        }
+    }
 }
 
 /**

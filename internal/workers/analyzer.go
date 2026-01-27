@@ -14,11 +14,12 @@ import (
 
 // TaskAnalyzer processes task analysis jobs
 type TaskAnalyzer struct {
-	aiProvider   ai.AIProvider
-	todoRepo     database.TodoRepositoryInterface
-	contextRepo  database.AIContextRepositoryInterface
-	activityRepo database.UserActivityRepositoryInterface
-	jobQueue     queue.JobQueue // For re-enqueueing jobs with delays
+	aiProvider    ai.AIProvider
+	todoRepo      database.TodoRepositoryInterface
+	contextRepo   database.AIContextRepositoryInterface
+	activityRepo  database.UserActivityRepositoryInterface
+	tagStatsRepo  database.TagStatisticsRepositoryInterface // For loading tag statistics to guide AI
+	jobQueue      queue.JobQueue // For re-enqueueing jobs with delays
 }
 
 // NewTaskAnalyzer creates a new task analyzer
@@ -27,6 +28,7 @@ func NewTaskAnalyzer(
 	todoRepo database.TodoRepositoryInterface,
 	contextRepo database.AIContextRepositoryInterface,
 	activityRepo database.UserActivityRepositoryInterface,
+	tagStatsRepo database.TagStatisticsRepositoryInterface,
 	jobQueue queue.JobQueue,
 ) *TaskAnalyzer {
 	return &TaskAnalyzer{
@@ -34,6 +36,7 @@ func NewTaskAnalyzer(
 		todoRepo:     todoRepo,
 		contextRepo:  contextRepo,
 		activityRepo: activityRepo,
+		tagStatsRepo: tagStatsRepo,
 		jobQueue:     jobQueue,
 	}
 }
@@ -60,6 +63,15 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	context, err := a.contextRepo.GetByUserID(ctx, job.UserID)
 	if err == nil {
 		userContext = context
+	}
+
+	// Load tag statistics to guide AI tag selection
+	var tagStats *models.TagStatistics
+	if a.tagStatsRepo != nil {
+		stats, err := a.tagStatsRepo.GetByUserID(ctx, job.UserID)
+		if err == nil && stats != nil {
+			tagStats = stats
+		}
 	}
 
 	// Check if user has reprocessing paused
@@ -96,14 +108,14 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	// Check if provider supports due date analysis
 	if todo.DueDate != nil {
 		if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext)
+			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext, tagStats)
 		} else {
 			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
 		}
 	} else {
-		// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time
+		// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time and tag stats
 		if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext)
+			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext, tagStats)
 		} else {
 			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
 		}
@@ -126,15 +138,18 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	todo.Metadata.MergeTags(tags, existingUserTags)
 
 	// Update time horizon only if user hasn't manually set it
-	// For now, we'll update it - in production, we'd track if user manually set it
-	todo.TimeHorizon = timeHorizon
+	// Check if user has manually overridden the time horizon
+	if todo.Metadata.TimeHorizonUserOverride == nil || !*todo.Metadata.TimeHorizonUserOverride {
+		todo.TimeHorizon = timeHorizon
+	}
+	// If TimeHorizonUserOverride is true, preserve the existing time_horizon
 
 	// Set status to processed after successful analysis (unless it's completed)
 	if todo.Status == models.TodoStatusProcessing {
 		todo.Status = models.TodoStatusProcessed
 	}
 
-	// Update todo
+	// Update todo (tag change detection is handled automatically by the repository)
 	if err := a.todoRepo.Update(ctx, todo); err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
@@ -189,19 +204,28 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 			// If parsing fails, fall back to CreatedAt
 		}
 
+		// Load tag statistics for this user (reuse from earlier in the function)
+		var tagStats *models.TagStatistics
+		if a.tagStatsRepo != nil {
+			stats, err := a.tagStatsRepo.GetByUserID(ctx, job.UserID)
+			if err == nil && stats != nil {
+				tagStats = stats
+			}
+		}
+
 		// Analyze task (with due date if available)
 		var tags []string
 		var timeHorizon models.TimeHorizon
 		if todo.DueDate != nil {
 			if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext)
+				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext, tagStats)
 			} else {
 				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
 			}
 		} else {
-			// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time
+			// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time and tag stats
 			if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext)
+				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext, tagStats)
 			} else {
 				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
 			}
@@ -214,13 +238,17 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 		// Merge AI tags with user tags
 		todo.Metadata.MergeTags(tags, existingUserTags)
 
-		// Update time horizon only if it changed
-		if timeHorizon != originalTimeHorizon {
-			todo.TimeHorizon = timeHorizon
-			updated++
+		// Update time horizon only if user hasn't manually set it
+		// Check if user has manually overridden the time horizon
+		if todo.Metadata.TimeHorizonUserOverride == nil || !*todo.Metadata.TimeHorizonUserOverride {
+			if timeHorizon != originalTimeHorizon {
+				todo.TimeHorizon = timeHorizon
+				updated++
+			}
 		}
+		// If TimeHorizonUserOverride is true, preserve the existing time_horizon
 
-		// Update todo
+		// Update todo (tag change detection is handled automatically by the repository)
 		if err := a.todoRepo.Update(ctx, todo); err != nil {
 			log.Printf("Failed to update todo %s: %v", todo.ID, err)
 			continue

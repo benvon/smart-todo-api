@@ -165,7 +165,7 @@ func TestBuildAnalysisPrompt_TimeContext(t *testing.T) {
 			// Mock time.Now() by using a fixed time
 			// Since we can't easily mock time.Now(), we'll test with actual times
 			// but verify the relative calculations are correct
-			prompt := provider.buildAnalysisPrompt(tt.text, tt.dueDate, tt.createdAt, tt.userContext)
+			prompt := provider.buildAnalysisPrompt(tt.text, tt.dueDate, tt.createdAt, tt.userContext, nil)
 
 			// Basic validations
 			if !strings.Contains(prompt, tt.text) {
