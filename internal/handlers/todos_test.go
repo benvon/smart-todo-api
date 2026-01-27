@@ -16,7 +16,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-
 // TestCreateTodo_TimeEnteredLogic tests that TimeEntered is set correctly when creating todos
 // This tests the logic used in CreateTodo handler
 func TestCreateTodo_TimeEnteredLogic(t *testing.T) {
@@ -193,9 +192,9 @@ func TestTodoHandler_GetTagStats_Success(t *testing.T) {
 	}
 
 	var wrapper struct {
-		Success   bool            `json:"success"`
+		Success   bool             `json:"success"`
 		Data      TagStatsResponse `json:"data"`
-		Timestamp string          `json:"timestamp"`
+		Timestamp string           `json:"timestamp"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
@@ -308,9 +307,9 @@ func TestTodoHandler_GetTagStats_StaleData(t *testing.T) {
 	}
 
 	var wrapper struct {
-		Success   bool            `json:"success"`
+		Success   bool             `json:"success"`
 		Data      TagStatsResponse `json:"data"`
-		Timestamp string          `json:"timestamp"`
+		Timestamp string           `json:"timestamp"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &wrapper); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
@@ -325,15 +324,15 @@ func TestTodoHandler_GetTagStats_StaleData(t *testing.T) {
 
 // mockTagStatisticsRepoForHandlers is a mock for testing handlers
 type mockTagStatisticsRepoForHandlers struct {
-	t                         *testing.T
-	getByUserIDFunc           func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
-	getByUserIDOrCreateFunc   func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
-	updateStatisticsFunc      func(ctx context.Context, stats *models.TagStatistics) (bool, error)
-	markTaintedFunc           func(ctx context.Context, userID uuid.UUID) (bool, error)
-	getByUserIDCalls          []uuid.UUID
-	getByUserIDOrCreateCalls  []uuid.UUID
-	updateStatisticsCalls     []*models.TagStatistics
-	markTaintedCalls          []uuid.UUID
+	t                        *testing.T
+	getByUserIDFunc          func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	getByUserIDOrCreateFunc  func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	updateStatisticsFunc     func(ctx context.Context, stats *models.TagStatistics) (bool, error)
+	markTaintedFunc          func(ctx context.Context, userID uuid.UUID) (bool, error)
+	getByUserIDCalls         []uuid.UUID
+	getByUserIDOrCreateCalls []uuid.UUID
+	updateStatisticsCalls    []*models.TagStatistics
+	markTaintedCalls         []uuid.UUID
 }
 
 func (m *mockTagStatisticsRepoForHandlers) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error) {
@@ -436,5 +435,5 @@ func TestTodoHandler_GetTagStats_DefensiveNilCheck(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool {
-return &b
+	return &b
 }

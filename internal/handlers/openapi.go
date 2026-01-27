@@ -21,7 +21,7 @@ func NewOpenAPIHandler(openAPIPath string) *OpenAPIHandler {
 	// Resolve absolute paths to prevent directory traversal
 	absPath, _ := filepath.Abs(openAPIPath)
 	baseDir, _ := filepath.Abs(filepath.Dir(openAPIPath))
-	
+
 	return &OpenAPIHandler{
 		openAPIPath: absPath,
 		baseDir:     baseDir,

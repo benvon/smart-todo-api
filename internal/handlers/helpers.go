@@ -27,13 +27,13 @@ func sanitizeErrorMessage(message string) string {
 	// Remove file paths (common patterns)
 	// This is a basic sanitization - more complex patterns could be added
 	sanitized := message
-	
+
 	// Remove common internal details that shouldn't be exposed
 	// In a production system, you might want more sophisticated sanitization
 	if len(sanitized) > 200 {
 		sanitized = sanitized[:200] + "..."
 	}
-	
+
 	return sanitized
 }
 

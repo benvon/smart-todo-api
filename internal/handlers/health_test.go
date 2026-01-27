@@ -13,7 +13,7 @@ func TestHealthChecker_BasicMode(t *testing.T) {
 	// For now, we'll skip it and focus on testing the response structure
 	// In a real test environment, you'd use testcontainers or a test database
 	t.Skip("Requires database connection - implement with testcontainers or integration test setup")
-	
+
 	// Test structure:
 	// 1. Create health checker with real DB
 	// 2. Call HealthCheck with basic mode
@@ -25,7 +25,7 @@ func TestHealthChecker_ExtendedMode_ResponseStructure(t *testing.T) {
 
 	// Test the response structure and logic without requiring real connections
 	// This validates that the health check logic correctly structures responses
-	
+
 	tests := []struct {
 		name           string
 		mode           string
@@ -49,7 +49,7 @@ func TestHealthChecker_ExtendedMode_ResponseStructure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			
+
 			// This test requires real database/Redis/RabbitMQ connections
 			// For unit testing, we validate the response structure separately
 			// Integration tests would use testcontainers

@@ -403,8 +403,9 @@ components:
           maxLength: 1000
         time_horizon:
           type: string
-          description: "Time horizon for the todo. Set to empty string to clear user override and allow AI to manage. Valid values: 'next', 'soon', 'later', or empty string to clear override."
-          enum: [next, soon, later, ""]
+          nullable: true
+          description: "Time horizon for the todo. Valid values: 'next', 'soon', 'later'. Set to empty string or null to clear user override and allow AI to manage."
+          enum: [next, soon, later]
         status:
           type: string
           enum: [pending, processing, completed]
