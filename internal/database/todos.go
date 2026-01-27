@@ -254,9 +254,6 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags 
 	var tagsChanged bool
 	if r.tagStatsRepo != nil && oldTags != nil {
 		// Normalize nil slices to empty slices for comparison
-		if oldTags == nil {
-			oldTags = []string{}
-		}
 		if todo.Metadata.CategoryTags == nil {
 			newTags = []string{}
 		} else {
