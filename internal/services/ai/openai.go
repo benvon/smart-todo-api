@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -415,7 +416,12 @@ func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.T
 	currentTokens := len(currentPrompt) / CharsPerToken
 	
 	// Use conservative context limit to work safely with most models
-	maxTagTokens := (MaxContextTokens - currentTokens) * tagsTokenPercent / 100
+	// Ensure we don't have negative available tokens if prompt is already large
+	availableTokens := MaxContextTokens - currentTokens
+	if availableTokens < 0 {
+		availableTokens = 0
+	}
+	maxTagTokens := availableTokens * tagsTokenPercent / 100
 
 	// Build tag list with relevance scores
 	tagList := make([]tagEntry, 0, len(tagStats.TagStats))
@@ -450,12 +456,13 @@ func (p *OpenAIProvider) selectTagsForPrompt(todoText string, tagStats *models.T
 	usedTokens := 0
 
 	for _, entry := range tagList {
+		// Get stats once to avoid repeated map lookups
+		stats := tagStats.TagStats[entry.tag]
+		
 		// Estimate tokens for this tag entry
 		// Format: "- tagname (used N times, X AI-generated, Y user-defined)\n"
 		tagEntryText := fmt.Sprintf("- %s (used %d times, %d AI-generated, %d user-defined)\n",
-			entry.tag, entry.total,
-			tagStats.TagStats[entry.tag].AI,
-			tagStats.TagStats[entry.tag].User)
+			entry.tag, entry.total, stats.AI, stats.User)
 		tagTokens := len(tagEntryText) / CharsPerToken
 
 		// Check if adding this tag would exceed limits
@@ -531,12 +538,16 @@ func RegisterOpenAI(registry *ProviderRegistry) {
 		if maxTags := config["max_prompt_tags"]; maxTags != "" {
 			if val, err := parseIntOrDefault(maxTags, DefaultMaxPromptTags); err == nil {
 				provider.maxPromptTags = val
+			} else {
+				log.Printf("Warning: invalid AI_MAX_PROMPT_TAGS value '%s': %v. Using default: %d", maxTags, err, DefaultMaxPromptTags)
 			}
 		}
 
 		if tokenPercent := config["tags_token_percent"]; tokenPercent != "" {
 			if val, err := parseIntOrDefault(tokenPercent, DefaultTagsTokenPercent); err == nil {
 				provider.tagsTokenPercent = val
+			} else {
+				log.Printf("Warning: invalid AI_TAGS_TOKEN_PERCENT value '%s': %v. Using default: %d", tokenPercent, err, DefaultTagsTokenPercent)
 			}
 		}
 
