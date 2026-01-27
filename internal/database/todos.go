@@ -247,39 +247,33 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 }
 
 // Update updates an existing todo
-func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo) error {
+// oldTags should be the CategoryTags from the existing todo before the update (pass nil if unknown)
+func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags []string) error {
 	// Detect tag changes if tag statistics support is enabled
-	var oldTags []string
 	var newTags []string
 	var tagsChanged bool
-	if r.tagStatsRepo != nil {
-		// Load existing todo to compare tags
-		existing, err := r.GetByID(ctx, todo.ID)
-		if err == nil {
-			// Normalize nil slices to empty slices for comparison
-			if existing.Metadata.CategoryTags == nil {
-				oldTags = []string{}
-			} else {
-				oldTags = existing.Metadata.CategoryTags
-			}
-			if todo.Metadata.CategoryTags == nil {
-				newTags = []string{}
-			} else {
-				newTags = todo.Metadata.CategoryTags
-			}
-			tagsChanged = !tagsEqual(oldTags, newTags)
-			if tagsChanged {
-				log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, newTags)
-			} else {
-				log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, newTags)
-			}
+	if r.tagStatsRepo != nil && oldTags != nil {
+		// Normalize nil slices to empty slices for comparison
+		if oldTags == nil {
+			oldTags = []string{}
+		}
+		if todo.Metadata.CategoryTags == nil {
+			newTags = []string{}
 		} else {
-			// If GetByID fails, we can't compare tags, so we'll skip tag change detection
-			// This might happen if the todo was just created and hasn't been persisted yet
-			log.Printf("Could not load existing todo %s for tag comparison: %v (skipping tag change detection)", todo.ID, err)
+			newTags = todo.Metadata.CategoryTags
+		}
+		tagsChanged = !tagsEqual(oldTags, newTags)
+		if tagsChanged {
+			log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, newTags)
+		} else {
+			log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, newTags)
 		}
 	} else {
-		log.Printf("Tag stats repo not configured for todo repository, skipping tag change detection")
+		if r.tagStatsRepo == nil {
+			log.Printf("Tag stats repo not configured for todo repository, skipping tag change detection")
+		} else {
+			log.Printf("Old tags not provided for todo %s, skipping tag change detection", todo.ID)
+		}
 	}
 
 	query := `

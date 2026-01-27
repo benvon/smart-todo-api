@@ -110,6 +110,9 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		return fmt.Errorf("failed to get todo: %w", err)
 	}
 
+	// Save original tags for tag change detection
+	originalTags := todo.Metadata.CategoryTags
+
 	// Verify todo belongs to user
 	if todo.UserID != job.UserID {
 		return fmt.Errorf("todo does not belong to user")
@@ -140,7 +143,7 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	// Only update if currently pending (don't override completed status)
 	if todo.Status == models.TodoStatusPending {
 		todo.Status = models.TodoStatusProcessing
-		if err := a.todoRepo.Update(ctx, todo); err != nil {
+		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 			log.Printf("Failed to update todo status to processing: %v", err)
 			// Continue with analysis even if status update fails
 		} else {
@@ -179,7 +182,7 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		// On error, set status back to pending so it can be retried
 		if todo.Status == models.TodoStatusProcessing {
 			todo.Status = models.TodoStatusPending
-			if updateErr := a.todoRepo.Update(ctx, todo); updateErr != nil {
+			if updateErr := a.todoRepo.Update(ctx, todo, originalTags); updateErr != nil {
 				log.Printf("Failed to reset todo status to pending after error: %v", updateErr)
 			}
 		}
@@ -205,7 +208,7 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	}
 
 	// Update todo (tag change detection is handled automatically by the repository)
-	if err := a.todoRepo.Update(ctx, todo); err != nil {
+	if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
 
@@ -246,6 +249,9 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 	// Re-analyze each todo
 	updated := 0
 	for _, todo := range todosToProcess {
+		// Save original tags for tag change detection
+		originalTags := todo.Metadata.CategoryTags
+
 		// Get existing user-defined tags and time horizon override
 		existingUserTags := todo.Metadata.GetUserTags()
 		originalTimeHorizon := todo.TimeHorizon
@@ -302,7 +308,7 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 		// If TimeHorizonUserOverride is true, preserve the existing time_horizon
 
 		// Update todo (tag change detection is handled automatically by the repository)
-		if err := a.todoRepo.Update(ctx, todo); err != nil {
+		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 			log.Printf("Failed to update todo %s: %v", todo.ID, err)
 			continue
 		}
