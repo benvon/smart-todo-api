@@ -13,9 +13,9 @@ import (
 
 // HealthChecker handles health check requests
 type HealthChecker struct {
-	db          *database.DB
+	db           *database.DB
 	redisLimiter *middleware.RedisRateLimiter
-	jobQueue    queue.JobQueue
+	jobQueue     queue.JobQueue
 }
 
 // NewHealthChecker creates a new health checker
@@ -26,9 +26,9 @@ func NewHealthChecker(db *database.DB) *HealthChecker {
 // NewHealthCheckerWithDeps creates a new health checker with Redis and RabbitMQ dependencies
 func NewHealthCheckerWithDeps(db *database.DB, redisLimiter *middleware.RedisRateLimiter, jobQueue queue.JobQueue) *HealthChecker {
 	return &HealthChecker{
-		db:          db,
+		db:           db,
 		redisLimiter: redisLimiter,
-		jobQueue:    jobQueue,
+		jobQueue:     jobQueue,
 	}
 }
 
@@ -42,7 +42,7 @@ type HealthResponse struct {
 // HealthCheck handles the /healthz endpoint
 func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	mode := r.URL.Query().Get("mode")
-	
+
 	response := HealthResponse{
 		Status:    "healthy",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -50,7 +50,7 @@ func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 	if mode == "extended" {
 		checks := make(map[string]string)
-		
+
 		// Check database connection
 		if err := h.checkDatabase(r.Context()); err != nil {
 			response.Status = "unhealthy"
@@ -59,7 +59,7 @@ func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		} else {
 			checks["database"] = "healthy"
 		}
-		
+
 		// Check Redis connection
 		if h.redisLimiter != nil {
 			if err := h.checkRedis(r.Context()); err != nil {
@@ -71,7 +71,7 @@ func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		} else {
 			checks["redis"] = "not configured"
 		}
-		
+
 		// Check RabbitMQ connection
 		if h.jobQueue != nil {
 			if err := h.checkRabbitMQ(r.Context()); err != nil {
@@ -83,14 +83,14 @@ func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		} else {
 			checks["rabbitmq"] = "not configured"
 		}
-		
+
 		response.Checks = checks
-		
+
 		statusCode := http.StatusOK
 		if response.Status == "unhealthy" {
 			statusCode = http.StatusServiceUnavailable
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
 		if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -126,10 +126,10 @@ func (h *HealthChecker) checkRedis(ctx context.Context) error {
 	if h.redisLimiter == nil {
 		return nil // Not configured, skip check
 	}
-	
+
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	
+
 	// Use the Redis client's Ping method
 	// The RedisRateLimiter wraps a redis.Client, but we need to access it
 	// For now, we'll use a simple approach: try to get a key (which will ping)
@@ -143,10 +143,10 @@ func (h *HealthChecker) checkRabbitMQ(ctx context.Context) error {
 	if h.jobQueue == nil {
 		return nil // Not configured, skip check
 	}
-	
+
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	
+
 	// Try to check if the connection is still alive
 	// RabbitMQQueue has a conn field, but it's private
 	// We can try a lightweight operation or add a HealthCheck method

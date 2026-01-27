@@ -82,11 +82,11 @@ type CreateTodoRequest struct {
 
 // UpdateTodoRequest represents an update todo request
 type UpdateTodoRequest struct {
-	Text        *string             `json:"text,omitempty"`
-	TimeHorizon *models.TimeHorizon `json:"time_horizon,omitempty"`
-	Status      *models.TodoStatus  `json:"status,omitempty"`
-	Tags        *[]string           `json:"tags,omitempty"`     // User-defined tags (overrides AI tags)
-	DueDate     *string             `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
+	Text        *string            `json:"text,omitempty"`
+	TimeHorizon *string            `json:"time_horizon,omitempty"` // Empty string to clear user override and let AI manage
+	Status      *models.TodoStatus `json:"status,omitempty"`
+	Tags        *[]string          `json:"tags,omitempty"`     // User-defined tags (overrides AI tags)
+	DueDate     *string            `json:"due_date,omitempty"` // ISO 8601 (RFC3339) format, e.g., "2024-03-15T14:30:00Z", empty string to clear
 }
 
 // ListTodosResponse represents the paginated response for listing todos
@@ -357,16 +357,23 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		todo.Text = sanitized
 	}
 	if req.TimeHorizon != nil {
-		// Validate enum value
-		if err := validation.ValidateTimeHorizon(string(*req.TimeHorizon)); err != nil {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
-			return
+		// Empty string means clear the user override and let AI manage time horizon
+		if *req.TimeHorizon == "" {
+			// Clear the user override flag to allow AI to manage time horizon again
+			override := false
+			todo.Metadata.TimeHorizonUserOverride = &override
+		} else {
+			// Validate enum value
+			if err := validation.ValidateTimeHorizon(*req.TimeHorizon); err != nil {
+				respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+				return
+			}
+			// User explicitly setting time horizon - mark as user override
+			todo.TimeHorizon = models.TimeHorizon(*req.TimeHorizon)
+			// Mark that user has manually set the time horizon
+			override := true
+			todo.Metadata.TimeHorizonUserOverride = &override
 		}
-		// User explicitly setting time horizon - mark as user override
-		todo.TimeHorizon = *req.TimeHorizon
-		// Mark that user has manually set the time horizon
-		override := true
-		todo.Metadata.TimeHorizonUserOverride = &override
 	}
 	if req.Status != nil {
 		// Validate enum value
@@ -565,7 +572,7 @@ func (h *TodoHandler) GetTagStats(w http.ResponseWriter, r *http.Request) {
 
 	response := TagStatsResponse{
 		TagStats:       stats.TagStats,
-		Tainted:         stats.Tainted,
+		Tainted:        stats.Tainted,
 		LastAnalyzedAt: stats.LastAnalyzedAt,
 	}
 

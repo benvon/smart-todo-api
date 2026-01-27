@@ -32,8 +32,8 @@ func (h *AIContextHandler) RegisterRoutes(r *mux.Router) {
 
 // GetContextRequest represents a get context request (empty for now, but could be extended)
 type GetContextResponse struct {
-	ContextSummary string                `json:"context_summary,omitempty"`
-	Preferences    map[string]any        `json:"preferences,omitempty"`
+	ContextSummary string         `json:"context_summary,omitempty"`
+	Preferences    map[string]any `json:"preferences,omitempty"`
 }
 
 // GetContext returns the current user's AI context
@@ -70,8 +70,8 @@ func (h *AIContextHandler) GetContext(w http.ResponseWriter, r *http.Request) {
 
 // UpdateContextRequest represents an update context request
 type UpdateContextRequest struct {
-	ContextSummary *string                `json:"context_summary,omitempty"`
-	Preferences    map[string]any         `json:"preferences,omitempty"`
+	ContextSummary *string        `json:"context_summary,omitempty"`
+	Preferences    map[string]any `json:"preferences,omitempty"`
 }
 
 // UpdateContext updates the current user's AI context
