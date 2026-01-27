@@ -7,6 +7,7 @@ import { initChat } from './chat.js';
 import { initProfile } from './profile.js';
 import logger from './logger.js';
 import { showError } from './error-utils.js';
+import { escapeHtml } from './html-utils.js';
 
 let todos = [];
 
@@ -207,15 +208,6 @@ async function updateExtendedStatus() {
     } catch (error) {
         dropdownContent.innerHTML = `<div class="api-status-detail error">Failed to load extended status: ${escapeHtml(error.message)}</div>`;
     }
-}
-
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 /**
