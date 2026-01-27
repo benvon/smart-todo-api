@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/models"
@@ -347,14 +348,10 @@ Return only valid JSON.`
 			tagList = append(tagList, tagEntry{tag: tag, total: stats.Total})
 		}
 		
-		// Simple sort by total count (descending)
-		for i := 0; i < len(tagList)-1; i++ {
-			for j := i + 1; j < len(tagList); j++ {
-				if tagList[i].total < tagList[j].total {
-					tagList[i], tagList[j] = tagList[j], tagList[i]
-				}
-			}
-		}
+		// Sort by total count (descending)
+		sort.Slice(tagList, func(i, j int) bool {
+			return tagList[i].total > tagList[j].total
+		})
 		
 		// Format tag list (limit to top 50 to avoid prompt bloat)
 		maxTags := 50
