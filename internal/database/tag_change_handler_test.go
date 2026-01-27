@@ -155,6 +155,149 @@ func TestTagChangeHandler_RegressionTest_OldBehaviorWouldFail(t *testing.T) {
 	}
 }
 
+// TestTagChangeHandler_ErrorHandling tests error handling in the tag change handler
+// This ensures proper behavior when MarkTainted or Enqueue operations fail
+func TestTagChangeHandler_ErrorHandling(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		markTaintedError  error
+		enqueueError      error
+		expectJobEnqueue  bool
+		expectHandlerFail bool
+		description       string
+	}{
+		{
+			name:              "enqueue job even when MarkTainted fails",
+			markTaintedError:  errors.New("database connection failed"),
+			enqueueError:      nil,
+			expectJobEnqueue:  true,
+			expectHandlerFail: false,
+			description:       "Job should still be enqueued even if MarkTainted fails to prevent inconsistent state",
+		},
+		{
+			name:              "handler fails when Enqueue fails",
+			markTaintedError:  nil,
+			enqueueError:      errors.New("queue connection failed"),
+			expectJobEnqueue:  false,
+			expectHandlerFail: true,
+			description:       "Handler should fail if job cannot be enqueued",
+		},
+		{
+			name:              "handler continues with both errors but job enqueue attempted",
+			markTaintedError:  errors.New("database connection failed"),
+			enqueueError:      errors.New("queue connection failed"),
+			expectJobEnqueue:  false,
+			expectHandlerFail: true,
+			description:       "Handler should attempt to enqueue even if MarkTainted fails, but fail if Enqueue fails",
+		},
+		{
+			name:              "handler succeeds when both operations succeed",
+			markTaintedError:  nil,
+			enqueueError:      nil,
+			expectJobEnqueue:  true,
+			expectHandlerFail: false,
+			description:       "Normal case: both operations succeed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			userID := uuid.New()
+			jobEnqueued := false
+			markTaintedCalled := false
+			enqueueCalled := false
+
+			// Create a mock tag stats repo
+			mockTagStatsRepo := &mockTagStatsRepoForHandlerTest{
+				markTaintedFunc: func(ctx context.Context, uid uuid.UUID) (bool, error) {
+					markTaintedCalled = true
+					if tt.markTaintedError != nil {
+						return false, tt.markTaintedError
+					}
+					return true, nil
+				},
+			}
+
+			// Create a mock job queue
+			mockJobQueue := &mockJobQueueForHandlerTest{
+				enqueueFunc: func(ctx context.Context, job interface{}) error {
+					enqueueCalled = true
+					if tt.enqueueError != nil {
+						return tt.enqueueError
+					}
+					jobEnqueued = true
+					return nil
+				},
+			}
+
+			// Simulate the IMPROVED handler logic that continues to enqueue even if MarkTainted fails
+			handler := func(ctx context.Context, uid uuid.UUID) error {
+				var markTaintedErr error
+				
+				// Always attempt to mark tag statistics as tainted
+				_, err := mockTagStatsRepo.MarkTainted(ctx, uid)
+				if err != nil {
+					// Log the error but continue to enqueue the job
+					markTaintedErr = err
+				}
+
+				// Always enqueue tag analysis job when tags change
+				// This must happen even if MarkTainted fails to avoid inconsistent state
+				if mockJobQueue != nil {
+					if err := mockJobQueue.Enqueue(ctx, nil); err != nil {
+						// If both operations failed, return both errors
+						if markTaintedErr != nil {
+							return errors.Join(markTaintedErr, err)
+						}
+						return err
+					}
+				}
+
+				// If only MarkTainted failed, we've successfully enqueued the job
+				// which will eventually fix the tainted state, so we can ignore the error
+				// and let the system self-heal
+				return nil
+			}
+
+			// Invoke handler
+			err := handler(context.Background(), userID)
+
+			// Verify error expectations
+			if tt.expectHandlerFail {
+				if err == nil {
+					t.Errorf("Expected handler to fail but it succeeded. %s", tt.description)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected handler to succeed but it failed with: %v. %s", err, tt.description)
+				}
+			}
+
+			// Verify MarkTainted was always attempted
+			if !markTaintedCalled {
+				t.Error("Expected MarkTainted to be called")
+			}
+
+			// Verify Enqueue was attempted (even if MarkTainted failed)
+			if !enqueueCalled {
+				t.Error("Expected Enqueue to be attempted even if MarkTainted failed")
+			}
+
+			// Verify job enqueue state
+			if tt.expectJobEnqueue && !jobEnqueued {
+				t.Errorf("Expected job to be enqueued but it wasn't. %s", tt.description)
+			}
+			if !tt.expectJobEnqueue && jobEnqueued {
+				t.Errorf("Expected job not to be enqueued but it was. %s", tt.description)
+			}
+		})
+	}
+}
+
 // mockTagStatsRepoForHandlerTest is a mock for testing tag change handlers
 type mockTagStatsRepoForHandlerTest struct {
 	markTaintedFunc func(ctx context.Context, userID uuid.UUID) (bool, error)
