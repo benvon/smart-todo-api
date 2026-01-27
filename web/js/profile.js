@@ -74,7 +74,7 @@ async function loadProfileData() {
     ]);
 
     // Handle user info result
-    const [userResult, contextResult, tagStatsResult] = results;
+    const [userResult, contextResult] = results;
     
     if (userResult.status === 'fulfilled' && userResult.value.data) {
         const user = userResult.value.data;
@@ -101,21 +101,22 @@ async function loadProfileData() {
         } else {
             currentContext = '';
         }
-        const contextTextarea = document.getElementById('context-textarea');
-        if (contextTextarea) {
-            contextTextarea.value = currentContext;
-        }
     } else if (contextResult.status === 'rejected') {
+        // Clear context on error to avoid showing stale data
+        currentContext = '';
         logger.error('Failed to load AI context:', contextResult.reason);
         if (!contextResult.reason?.isAuthError) {
             showError(contextResult.reason?.message || 'Failed to load AI context');
         }
     }
-
-    // Tag stats are handled in loadTagStats, which already has its own error handling
-    if (tagStatsResult.status === 'rejected') {
-        logger.error('Failed to load tag stats:', tagStatsResult.reason);
+    
+    // Update textarea with current context (whether loaded or cleared on error)
+    const contextTextarea = document.getElementById('context-textarea');
+    if (contextTextarea) {
+        contextTextarea.value = currentContext;
     }
+
+    // Tag stats error handling is done in loadTagStats function itself
 }
 
 /**
