@@ -3,6 +3,7 @@
 import { getCurrentUser, getAIContext, updateAIContext, getTagStats } from './api.js';
 import { logout } from './auth.js';
 import logger from './logger.js';
+import { showError } from './error-utils.js';
 
 let currentContext = '';
 
@@ -257,16 +258,4 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-/**
- * Show error message (reuse from app.js)
- */
-function showError(message) {
-    const errorEl = document.getElementById('error-message');
-    if (errorEl) {
-        errorEl.textContent = message;
-        errorEl.style.display = 'block';
-        setTimeout(() => {
-            errorEl.style.display = 'none';
-        }, 5000);
-    }
-}
+

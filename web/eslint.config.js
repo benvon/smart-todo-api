@@ -44,6 +44,7 @@ export default [
                 EventSource: 'readonly',
                 DOMException: 'readonly',
                 structuredClone: 'readonly',
+                HTMLElement: 'readonly',
                 // Node.js globals
                 process: 'readonly',
                 Buffer: 'readonly',
