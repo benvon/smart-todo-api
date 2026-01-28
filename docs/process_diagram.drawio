@@ -1,5 +1,5 @@
 <mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15" version="29.3.6" pages="2">
-  <diagram name="Page-1" id="kj8-H1u4PH7onFtzzLDC">
+  <diagram name="Process" id="kj8-H1u4PH7onFtzzLDC">
     <mxGraphModel dx="882" dy="741" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
@@ -58,7 +58,7 @@
       </root>
     </mxGraphModel>
   </diagram>
-  <diagram id="bSIlCMoj3zQi9mxXUXKj" name="Page-2">
+  <diagram id="bSIlCMoj3zQi9mxXUXKj" name="Infra">
     <mxGraphModel dx="882" dy="741" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
