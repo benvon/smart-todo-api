@@ -1,6 +1,6 @@
-<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15" version="29.3.6">
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15" version="29.3.6" pages="2">
   <diagram name="Page-1" id="kj8-H1u4PH7onFtzzLDC">
-    <mxGraphModel dx="930" dy="707" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="882" dy="741" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -54,6 +54,47 @@
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-16" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Repeat as required" vertex="1">
           <mxGeometry height="30" width="60" x="390" y="400" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="bSIlCMoj3zQi9mxXUXKj" name="Page-2">
+    <mxGraphModel dx="882" dy="741" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-1" parent="1" style="sketch=0;html=1;aspect=fixed;strokeColor=none;shadow=0;fillColor=#3B8DF1;verticalAlign=top;labelPosition=center;verticalLabelPosition=bottom;shape=mxgraph.gcp2.website" value="SPA frontend" vertex="1">
+          <mxGeometry height="97" width="100" x="40" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="API" vertex="1">
+          <mxGeometry height="60" width="120" x="281" y="117" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Worker" vertex="1">
+          <mxGeometry height="60" width="120" x="449" y="117" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-4" parent="1" style="points=[];aspect=fixed;html=1;align=center;shadow=0;dashed=0;fillColor=#FF6A00;strokeColor=none;shape=mxgraph.alibaba_cloud.mq_message_queue;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;" value="Message Queue" vertex="1">
+          <mxGeometry height="49.8" width="45" x="395" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-5" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=-0.022;entryY=0.582;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-6" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.978;entryY=0.763;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-7" parent="1" style="image;sketch=0;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/mscae/Cache_Redis_Product.svg;" value="Session &amp;amp; Rate limiting" vertex="1">
+          <mxGeometry height="42" width="50" x="260" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-8" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-9" parent="1" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/databases/Azure_Database_PostgreSQL_Server.svg;" value="Database" vertex="1">
+          <mxGeometry height="64" width="48" x="401" y="340" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-10" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.656;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-11" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.672;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-9">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
