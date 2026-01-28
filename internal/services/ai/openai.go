@@ -430,7 +430,7 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 			zap.String("response_preview", SanitizeResponse(content, true)),
 			zap.String("user_id", userIDStr),
 			zap.String("request_id", requestID),
-			zap.Duration("latency_ms", latency),
+			zap.Int64("latency_ms", latency.Milliseconds()),
 		)
 	}
 
