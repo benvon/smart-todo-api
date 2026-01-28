@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
@@ -258,20 +259,21 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 			// Log error but don't fail the request
 			// The todo was created successfully, analysis can be retried later
 			h.logger.Warn("failed_to_enqueue_ai_analysis_job",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", user.ID.String()),
-				zap.Error(err),
+				zap.String("operation", "create_todo"),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 		} else {
 			h.logger.Info("enqueued_ai_analysis_job",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", user.ID.String()),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 			)
 		}
 	} else {
 		h.logger.Debug("job_queue_not_available",
-			zap.String("todo_id", todo.ID.String()),
-			zap.String("user_id", user.ID.String()),
+			zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 		)
 	}
 
@@ -541,17 +543,18 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
 		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
 			h.logger.Error("failed_to_enqueue_ai_analysis_job_manual",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", user.ID.String()),
-				zap.Error(err),
+				zap.String("operation", "analyze_todo"),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to enqueue analysis job")
 			return
 		}
 
 		h.logger.Info("enqueued_ai_analysis_job_manual",
-			zap.String("todo_id", todo.ID.String()),
-			zap.String("user_id", user.ID.String()),
+			zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 		)
 		respondJSON(w, http.StatusAccepted, map[string]string{
 			"message": "Analysis job enqueued",
@@ -562,8 +565,8 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 
 	// Job queue not available
 	h.logger.Warn("job_queue_not_available_manual_analysis",
-		zap.String("todo_id", todo.ID.String()),
-		zap.String("user_id", user.ID.String()),
+		zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+		zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 	)
 	respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "AI analysis is not available")
 }

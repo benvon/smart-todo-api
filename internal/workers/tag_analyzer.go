@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"go.uber.org/zap"
@@ -38,8 +39,8 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	}
 
 	a.logger.Info("processing_tag_analysis_job",
-		zap.String("job_id", job.ID.String()),
-		zap.String("user_id", job.UserID.String()),
+		zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 	)
 
 	// Get or create tag statistics record
@@ -49,7 +50,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	}
 
 	a.logger.Debug("tag_statistics_status",
-		zap.String("user_id", job.UserID.String()),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		zap.Bool("tainted", stats.Tainted),
 		zap.Int("existing_tags", len(stats.TagStats)),
 	)
@@ -84,7 +85,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	}
 
 	a.logger.Debug("loaded_todos_for_tag_analysis",
-		zap.String("user_id", job.UserID.String()),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		zap.Int("total_todos", len(allTodos)),
 		zap.Int("pages", page),
 	)
@@ -135,7 +136,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	}
 
 	a.logger.Info("aggregated_tag_statistics",
-		zap.String("user_id", job.UserID.String()),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		zap.Int("todos_with_tags", todosWithTags),
 		zap.Int("completed_todos_with_tags", completedTodosWithTags),
 		zap.Int("unique_tags", len(tagStatsMap)),
@@ -156,13 +157,13 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 		// Version conflict - another worker updated the statistics
 		// This is expected in concurrent scenarios, log and return success
 		a.logger.Debug("tag_statistics_version_conflict",
-			zap.String("user_id", job.UserID.String()),
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		)
 		return nil
 	}
 
 	a.logger.Info("successfully_analyzed_tags",
-		zap.String("user_id", job.UserID.String()),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		zap.Int("unique_tags", len(tagStatsMap)),
 	)
 	if len(tagStatsMap) > 0 && a.logger.Core().Enabled(zap.DebugLevel) {
@@ -172,7 +173,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 			tagList = append(tagList, tag)
 		}
 		a.logger.Debug("tag_breakdown",
-			zap.String("user_id", job.UserID.String()),
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 			zap.Strings("tags", tagList),
 		)
 	}
@@ -185,15 +186,18 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 
 	// Check if job should be processed now (respect NotBefore)
 	if !job.ShouldProcess() {
-		a.logger.Debug("tag_analysis_job_not_ready",
-			zap.String("job_id", job.ID.String()),
-			zap.Any("not_before", job.NotBefore),
-		)
+		fields := []zap.Field{
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+		}
+		if job.NotBefore != nil {
+			fields = append(fields, zap.Time("not_before", *job.NotBefore))
+		}
+		a.logger.Debug("tag_analysis_job_not_ready", fields...)
 		// Re-ack to return to queue and wait
 		if ackErr := msg.Ack(); ackErr != nil {
 			a.logger.Warn("failed_to_ack_job_for_later_processing",
-				zap.String("job_id", job.ID.String()),
-				zap.Error(ackErr),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(ackErr)),
 			)
 		}
 		return nil
@@ -205,14 +209,15 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 			// For tag analysis errors, log and nack without requeue
 			// Tag analysis can be retried later if needed
 			a.logger.Error("tag_analysis_job_failed",
-				zap.String("job_id", job.ID.String()),
-				zap.String("user_id", job.UserID.String()),
-				zap.Error(err),
+				zap.String("operation", "process_job"),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			if nackErr := msg.Nack(false); nackErr != nil {
 				a.logger.Warn("failed_to_nack_tag_analysis_job",
-					zap.String("job_id", job.ID.String()),
-					zap.Error(nackErr),
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(nackErr)),
 				)
 			}
 			return fmt.Errorf("tag analysis failed: %w", err)
@@ -225,9 +230,9 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 	default:
 		if nackErr := msg.Nack(false); nackErr != nil {
 			a.logger.Error("failed_to_nack_unknown_job_type",
-				zap.String("job_id", job.ID.String()),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 				zap.String("job_type", string(job.Type)),
-				zap.Error(nackErr),
+				zap.String("error", logpkg.SanitizeError(nackErr)),
 			)
 		}
 		return fmt.Errorf("unknown job type: %s", job.Type)

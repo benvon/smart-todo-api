@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -21,8 +22,8 @@ func ActivityTracking(activityRepo *database.UserActivityRepository, logger *zap
 				// Update last API interaction
 				if err := activityRepo.UpdateLastInteraction(ctx, user.ID); err != nil {
 					logger.Warn("failed_to_update_user_activity",
-						zap.Error(err),
-						zap.String("user_id", user.ID.String()),
+						zap.String("error", logpkg.SanitizeError(err)),
+						zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 					)
 					// Don't fail the request if activity tracking fails
 				}
@@ -41,7 +42,7 @@ func ActivityTracking(activityRepo *database.UserActivityRepository, logger *zap
 					usersToPause, err := activityRepo.GetUsersNeedingReprocessingPause(checkCtx)
 					if err != nil {
 						logger.Warn("failed_to_check_users_needing_pause",
-							zap.Error(err),
+							zap.String("error", logpkg.SanitizeError(err)),
 						)
 						return
 					}
@@ -50,8 +51,8 @@ func ActivityTracking(activityRepo *database.UserActivityRepository, logger *zap
 					for _, userID := range usersToPause {
 						if err := activityRepo.SetReprocessingPaused(checkCtx, userID, true); err != nil {
 							logger.Warn("failed_to_pause_reprocessing",
-								zap.Error(err),
-								zap.String("user_id", userID.String()),
+								zap.String("error", logpkg.SanitizeError(err)),
+								zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
 							)
 						}
 					}
@@ -92,7 +93,7 @@ func (at *ActivityTracker) Start(ctx context.Context) {
 			usersToPause, err := at.activityRepo.GetUsersNeedingReprocessingPause(ctx)
 			if err != nil {
 				at.logger.Warn("failed_to_check_users_needing_pause",
-					zap.Error(err),
+					zap.String("error", logpkg.SanitizeError(err)),
 				)
 				continue
 			}
@@ -100,8 +101,8 @@ func (at *ActivityTracker) Start(ctx context.Context) {
 			for _, userID := range usersToPause {
 				if err := at.activityRepo.SetReprocessingPaused(ctx, userID, true); err != nil {
 					at.logger.Warn("failed_to_pause_reprocessing",
-						zap.Error(err),
-						zap.String("user_id", userID.String()),
+						zap.String("error", logpkg.SanitizeError(err)),
+						zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
 					)
 				}
 			}

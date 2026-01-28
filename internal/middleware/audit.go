@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -23,8 +24,8 @@ func Audit(logger *zap.Logger) func(http.Handler) http.Handler {
 				logger.Warn("security_event",
 					zap.Int("status_code", statusCode),
 					zap.String("method", r.Method),
-					zap.String("path", r.URL.Path),
-					zap.String("ip", ip),
+					zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+					zap.String("ip", logpkg.SanitizeString(ip, logpkg.MaxGeneralStringLength)),
 				)
 			}
 
@@ -33,8 +34,8 @@ func Audit(logger *zap.Logger) func(http.Handler) http.Handler {
 				ip := getClientIP(r)
 				logger.Warn("rate_limit_violation",
 					zap.String("method", r.Method),
-					zap.String("path", r.URL.Path),
-					zap.String("ip", ip),
+					zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+					zap.String("ip", logpkg.SanitizeString(ip, logpkg.MaxGeneralStringLength)),
 				)
 			}
 		})

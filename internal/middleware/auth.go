@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/services/oidc"
 	"github.com/google/uuid"
@@ -89,8 +90,9 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 			oidcConfig, err := oidcProvider.GetConfig(ctx, providerName)
 			if err != nil {
 				logger.Error("failed_to_get_oidc_config",
-					zap.String("provider", providerName),
-					zap.Error(err),
+					zap.String("operation", "auth_middleware"),
+					zap.String("provider", logpkg.SanitizeString(providerName, logpkg.MaxGeneralStringLength)),
+					zap.String("error", logpkg.SanitizeError(err)),
 				)
 				respondError(w, http.StatusInternalServerError, "Failed to get OIDC configuration", logger)
 				return
@@ -108,10 +110,10 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 				// Log detailed error server-side, but send generic message to client
 				ip := getClientIP(r)
 				logger.Warn("token_verification_failed",
-					zap.String("ip", ip),
-					zap.String("issuer", oidcConfig.Issuer),
-					zap.Error(err),
-					zap.String("path", r.URL.Path),
+					zap.String("ip", logpkg.SanitizeString(ip, logpkg.MaxGeneralStringLength)),
+					zap.String("issuer", logpkg.SanitizeString(oidcConfig.Issuer, logpkg.MaxGeneralStringLength)),
+					zap.String("error", logpkg.SanitizeError(err)),
+					zap.String("path", logpkg.SanitizePath(r.URL.Path)),
 					zap.String("method", r.Method),
 				)
 				respondError(w, http.StatusUnauthorized, "Invalid or expired token", logger)
@@ -135,8 +137,10 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 					}
 					if err := userRepo.Create(ctx, user); err != nil {
 						logger.Error("failed_to_create_user",
-							zap.Error(err),
-							zap.String("provider_id", claims.Sub),
+							zap.String("operation", "auth_create_user"),
+							zap.String("error", logpkg.SanitizeError(err)),
+							zap.String("provider_id", logpkg.SanitizeUserID(claims.Sub)),
+							zap.String("email", logpkg.SanitizeString(claims.Email, logpkg.MaxGeneralStringLength)),
 						)
 						respondError(w, http.StatusInternalServerError, "Failed to create user", logger)
 						return
@@ -144,8 +148,9 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 				} else {
 					// Actual database error (connection failure, timeout, etc.)
 					logger.Error("database_error_fetching_user",
-						zap.Error(err),
-						zap.String("provider_id", claims.Sub),
+						zap.String("operation", "auth_fetch_user"),
+						zap.String("error", logpkg.SanitizeError(err)),
+						zap.String("provider_id", logpkg.SanitizeUserID(claims.Sub)),
 					)
 					respondError(w, http.StatusInternalServerError, "Database error", logger)
 					return
@@ -166,8 +171,8 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 					if err := userRepo.Update(ctx, user); err != nil {
 						// Log error but continue - user can still use the app with stale data
 						logger.Warn("failed_to_update_user_info",
-							zap.Error(err),
-							zap.String("user_id", user.ID.String()),
+							zap.String("error", logpkg.SanitizeError(err)),
+							zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 						)
 					}
 				}
@@ -190,8 +195,15 @@ func respondError(w http.ResponseWriter, status int, message string, logger *zap
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		// Use fallback logging to avoid recursion if logger fails
+		// Write directly to response writer as last resort
+		if _, writeErr := w.Write([]byte(`{"success":false,"error":"Failed to encode error response"}`)); writeErr != nil {
+			// If even writing fails, there's nothing more we can do
+			_ = writeErr
+		}
 		logger.Error("failed_to_encode_error_response",
-			zap.Error(err),
+			zap.String("operation", "auth_respond_error"),
+			zap.String("error", logpkg.SanitizeError(err)),
 			zap.Int("status_code", status),
 		)
 	}

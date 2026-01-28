@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
@@ -139,7 +140,7 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	activity, err := a.activityRepo.GetByUserID(ctx, job.UserID)
 	if err == nil && activity != nil && activity.ReprocessingPaused {
 		a.logger.Debug("skipping_analysis_reprocessing_paused",
-			zap.String("user_id", job.UserID.String()),
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		)
 		return nil
 	}
@@ -150,13 +151,14 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		todo.Status = models.TodoStatusProcessing
 		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 			a.logger.Warn("failed_to_update_todo_status_to_processing",
-				zap.String("todo_id", todo.ID.String()),
-				zap.Error(err),
+				zap.String("operation", "process_task_analysis_job"),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			// Continue with analysis even if status update fails
 		} else {
 			a.logger.Debug("set_todo_status_to_processing",
-				zap.String("todo_id", todo.ID.String()),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
 			)
 		}
 	}
@@ -198,8 +200,8 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 			todo.Status = models.TodoStatusPending
 			if updateErr := a.todoRepo.Update(ctx, todo, originalTags); updateErr != nil {
 				a.logger.Warn("failed_to_reset_todo_status_to_pending",
-					zap.String("todo_id", todo.ID.String()),
-					zap.Error(updateErr),
+					zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+					zap.String("error", logpkg.SanitizeError(updateErr)),
 				)
 			}
 		}
@@ -230,11 +232,11 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	}
 
 	a.logger.Info("analyzed_todo",
-		zap.String("todo_id", todo.ID.String()),
+		zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
 		zap.Strings("tags", tags),
 		zap.String("time_horizon", string(timeHorizon)),
 		zap.String("status", string(todo.Status)),
-		zap.String("user_id", job.UserID.String()),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 	)
 	return nil
 }
@@ -245,7 +247,7 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 	activity, err := a.activityRepo.GetByUserID(ctx, job.UserID)
 	if err == nil && activity != nil && activity.ReprocessingPaused {
 		a.logger.Debug("skipping_reprocessing_paused",
-			zap.String("user_id", job.UserID.String()),
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 		)
 		return nil
 	}
@@ -320,9 +322,10 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 		}
 		if err != nil {
 			a.logger.Error("failed_to_analyze_todo",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", job.UserID.String()),
-				zap.Error(err),
+				zap.String("operation", "reprocess_user_job"),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			continue
 		}
@@ -343,9 +346,10 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 		// Update todo (tag change detection is handled automatically by the repository)
 		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 			a.logger.Error("failed_to_update_todo",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", job.UserID.String()),
-				zap.Error(err),
+				zap.String("operation", "reprocess_user_job"),
+				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			continue
 		}
@@ -354,7 +358,7 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 	a.logger.Info("reprocessed_todos",
 		zap.Int("todos_processed", len(todosToProcess)),
 		zap.Int("time_horizons_updated", updated),
-		zap.String("user_id", job.UserID.String()),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 	)
 	return nil
 }
@@ -365,16 +369,19 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 
 	// Check if job should be processed now (respect NotBefore)
 	if !job.ShouldProcess() {
-		a.logger.Debug("job_not_ready_yet",
-			zap.String("job_id", job.ID.String()),
+		fields := []zap.Field{
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 			zap.String("job_type", string(job.Type)),
-			zap.Any("not_before", job.NotBefore),
-		)
+		}
+		if job.NotBefore != nil {
+			fields = append(fields, zap.Time("not_before", *job.NotBefore))
+		}
+		a.logger.Debug("job_not_ready_yet", fields...)
 		// Re-ack to return to queue and wait
 		if ackErr := msg.Ack(); ackErr != nil {
 			a.logger.Warn("failed_to_ack_job_for_later_processing",
-				zap.String("job_id", job.ID.String()),
-				zap.Error(ackErr),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(ackErr)),
 			)
 		}
 		return nil
@@ -395,8 +402,8 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 			// Reprocessing failures are less critical, just log
 			if nackErr := msg.Nack(false); nackErr != nil { // Don't requeue reprocessing jobs
 				a.logger.Warn("failed_to_nack_reprocessing_job",
-					zap.String("job_id", job.ID.String()),
-					zap.Error(nackErr),
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(nackErr)),
 				)
 			}
 			return fmt.Errorf("reprocessing failed: %w", err)
@@ -409,9 +416,10 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 	default:
 		if nackErr := msg.Nack(false); nackErr != nil { // Unknown job type, send to DLQ
 			a.logger.Error("failed_to_nack_unknown_job_type",
-				zap.String("job_id", job.ID.String()),
+				zap.String("operation", "process_job"),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 				zap.String("job_type", string(job.Type)),
-				zap.Error(nackErr),
+				zap.String("error", logpkg.SanitizeError(nackErr)),
 			)
 		}
 		return fmt.Errorf("unknown job type: %s", job.Type)
@@ -423,9 +431,10 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 	// Check if it's a quota error (should not retry immediately)
 	if ai.IsQuotaError(err) {
 		a.logger.Warn("quota_exceeded",
+			zap.String("operation", "handle_job_error"),
 			zap.String("job_type", jobType),
-			zap.String("job_id", job.ID.String()),
-			zap.Error(err),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+			zap.String("error", logpkg.SanitizeError(err)),
 		)
 
 		// For quota errors, re-enqueue with long delay (1 hour minimum)
@@ -434,7 +443,7 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 		a.logger.Info("re_enqueueing_job_quota_exhausted",
 			zap.String("job_type", jobType),
-			zap.String("job_id", job.ID.String()),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 			zap.Time("not_before", notBefore),
 			zap.Duration("retry_delay", retryDelay),
 		)
@@ -456,8 +465,8 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 		// Ack the current message
 		if ackErr := msg.Ack(); ackErr != nil {
 			a.logger.Warn("failed_to_ack_job_before_re_enqueue",
-				zap.String("job_id", job.ID.String()),
-				zap.Error(ackErr),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(ackErr)),
 			)
 		}
 
@@ -465,15 +474,15 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 		if a.jobQueue != nil {
 			if enqueueErr := a.jobQueue.Enqueue(ctx, delayedJob); enqueueErr != nil {
 				a.logger.Error("failed_to_re_enqueue_job_with_delay",
-					zap.String("job_id", job.ID.String()),
-					zap.Error(enqueueErr),
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(enqueueErr)),
 				)
 				// If re-enqueue fails, send to DLQ
 				return fmt.Errorf("quota exhausted, failed to re-enqueue: %w", enqueueErr)
 			}
 			a.logger.Info("successfully_re_enqueued_job",
 				zap.String("job_type", jobType),
-				zap.String("job_id", job.ID.String()),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 				zap.Time("retry_at", notBefore),
 			)
 			return nil // Successfully handled
@@ -481,12 +490,12 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 		// If no queue access, nack without requeue to prevent spam
 		a.logger.Warn("no_queue_access_cannot_re_enqueue",
-			zap.String("job_id", job.ID.String()),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 		)
 		if nackErr := msg.Nack(false); nackErr != nil {
 			a.logger.Warn("failed_to_nack_quota_error_job",
-				zap.String("job_id", job.ID.String()),
-				zap.Error(nackErr),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(nackErr)),
 			)
 		}
 
@@ -496,9 +505,10 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 	// Check if it's a rate limit error (should retry with backoff)
 	if ai.IsRateLimitError(err) {
 		a.logger.Warn("rate_limited",
+			zap.String("operation", "handle_job_error"),
 			zap.String("job_type", jobType),
-			zap.String("job_id", job.ID.String()),
-			zap.Error(err),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+			zap.String("error", logpkg.SanitizeError(err)),
 		)
 
 		retryDelay := ai.GetRetryDelay(err, job.RetryCount)
@@ -522,22 +532,22 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 			// Ack the current message
 			if ackErr := msg.Ack(); ackErr != nil {
 				a.logger.Warn("failed_to_ack_rate_limited_job",
-					zap.String("job_id", job.ID.String()),
-					zap.Error(ackErr),
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(ackErr)),
 				)
 			}
 
 			// Re-enqueue with delay
 			if enqueueErr := a.jobQueue.Enqueue(ctx, delayedJob); enqueueErr != nil {
 				a.logger.Error("failed_to_re_enqueue_rate_limited_job",
-					zap.String("job_id", job.ID.String()),
-					zap.Error(enqueueErr),
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(enqueueErr)),
 				)
 				// Fall back to nack with requeue
 				if nackErr := msg.Nack(true); nackErr != nil {
 					a.logger.Warn("failed_to_nack_rate_limited_job",
-						zap.String("job_id", job.ID.String()),
-						zap.Error(nackErr),
+						zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+						zap.String("error", logpkg.SanitizeError(nackErr)),
 					)
 				}
 				return fmt.Errorf("rate limited, failed to re-enqueue: %w", enqueueErr)
@@ -545,7 +555,7 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 			a.logger.Info("rate_limited_re_enqueued",
 				zap.String("job_type", jobType),
-				zap.String("job_id", job.ID.String()),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 				zap.Time("retry_at", notBefore),
 				zap.Duration("retry_delay", retryDelay),
 			)
@@ -556,14 +566,14 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 		if job.CanRetry() {
 			job.IncrementRetry()
 			a.logger.Info("rate_limit_will_retry_immediately",
-				zap.String("job_id", job.ID.String()),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 				zap.Int("attempt", job.RetryCount),
 				zap.Int("max_retries", job.MaxRetries),
 			)
 			if nackErr := msg.Nack(true); nackErr != nil {
 				a.logger.Warn("failed_to_nack_rate_limited_job",
-					zap.String("job_id", job.ID.String()),
-					zap.Error(nackErr),
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(nackErr)),
 				)
 			}
 			// Return error to signal worker to wait before processing next job
@@ -576,15 +586,15 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 		job.IncrementRetry()
 		a.logger.Warn("job_failed_will_retry",
 			zap.String("job_type", jobType),
-			zap.String("job_id", job.ID.String()),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 			zap.Int("attempt", job.RetryCount),
 			zap.Int("max_retries", job.MaxRetries),
-			zap.Error(err),
+			zap.String("error", logpkg.SanitizeError(err)),
 		)
 		if nackErr := msg.Nack(true); nackErr != nil {
 			a.logger.Warn("failed_to_nack_job",
-				zap.String("job_id", job.ID.String()),
-				zap.Error(nackErr),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(nackErr)),
 			)
 		}
 		return fmt.Errorf("job failed (will retry): %w", err)
@@ -592,15 +602,17 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 	// Max retries exceeded, send to DLQ
 	a.logger.Error("job_failed_max_retries_exceeded",
+		zap.String("operation", "handle_job_error"),
 		zap.String("job_type", jobType),
-		zap.String("job_id", job.ID.String()),
+		zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
 		zap.Int("max_retries", job.MaxRetries),
-		zap.Error(err),
+		zap.Int("retry_count", job.RetryCount),
+		zap.String("error", logpkg.SanitizeError(err)),
 	)
 	if nackErr := msg.Nack(false); nackErr != nil {
 		a.logger.Warn("failed_to_nack_job_to_dlq",
-			zap.String("job_id", job.ID.String()),
-			zap.Error(nackErr),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+			zap.String("error", logpkg.SanitizeError(nackErr)),
 		)
 	}
 	return fmt.Errorf("job failed (max retries): %w", err)

@@ -33,10 +33,21 @@ func NewProductionLogger(debugMode bool) (*zap.Logger, error) {
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
 
-	// Disable stack traces unless error level
-	config.DisableStacktrace = true
+	// Enable stack traces for error level and above
+	// When DisableStacktrace is false, zap automatically includes stack traces
+	// for error level and above logs
+	config.DisableStacktrace = false
 
 	return config.Build()
+}
+
+// Sync flushes any buffered log entries. This should be called before application exit.
+// It's safe to call Sync() multiple times.
+func Sync(logger *zap.Logger) error {
+	if logger == nil {
+		return nil
+	}
+	return logger.Sync()
 }
 
 // NewDevelopmentLogger creates a development logger with console encoding (for local dev)

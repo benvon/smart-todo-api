@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/services/ai"
@@ -67,8 +68,8 @@ func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
 		"session_id": session.UserID.String(),
 	})); err != nil {
 		h.logger.Warn("failed_to_write_sse_message",
-			zap.Error(err),
-			zap.String("user_id", user.ID.String()),
+			zap.String("error", logpkg.SanitizeError(err)),
+			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 		)
 		return
 	}
@@ -120,8 +121,8 @@ func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
 
 			if err := h.contextService.UpdateContextSummary(updateCtx, userID, messages); err != nil {
 				h.logger.Error("failed_to_save_chat_summary",
-					zap.Error(err),
-					zap.String("user_id", userID.String()),
+					zap.String("error", logpkg.SanitizeError(err)),
+					zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
 				)
 			}
 		}(cleanupCtx)
@@ -182,8 +183,8 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 			if err := h.contextService.UpdateContextSummary(summaryCtx, user.ID, session.Messages); err != nil {
 				h.logger.Error("failed_to_summarize_conversation",
-					zap.Error(err),
-					zap.String("user_id", user.ID.String()),
+					zap.String("error", logpkg.SanitizeError(err)),
+					zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 				)
 			}
 		}(ctx)

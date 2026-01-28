@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -21,9 +22,9 @@ func Logging(logger *zap.Logger) func(http.Handler) http.Handler {
 			duration := time.Since(start)
 			logger.Info("http_request",
 				zap.String("method", r.Method),
-				zap.String("path", r.URL.Path),
+				zap.String("path", logpkg.SanitizePath(r.URL.Path)),
 				zap.Int("status_code", wrapped.statusCode),
-				zap.Duration("duration_ms", duration),
+				zap.Int64("duration_ms", duration.Milliseconds()),
 			)
 		})
 	}

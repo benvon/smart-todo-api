@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +48,7 @@ func CORS(allowedOrigins []string, logger *zap.Logger, debugMode bool) func(http
 			if origin != "" && !isValidOrigin(origin) {
 				if debugMode {
 					logger.Debug("cors_invalid_origin_format",
-						zap.String("origin", origin),
+						zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
 					)
 				}
 				// Continue but don't set CORS headers for invalid origins
@@ -57,8 +58,8 @@ func CORS(allowedOrigins []string, logger *zap.Logger, debugMode bool) func(http
 			if debugMode {
 				logger.Debug("cors_request",
 					zap.String("method", r.Method),
-					zap.String("path", r.URL.Path),
-					zap.String("origin", origin),
+					zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+					zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
 				)
 			}
 
@@ -77,7 +78,7 @@ func CORS(allowedOrigins []string, logger *zap.Logger, debugMode bool) func(http
 			if r.Method == http.MethodOptions {
 				if debugMode {
 					logger.Debug("cors_options_preflight",
-						zap.String("path", r.URL.Path),
+						zap.String("path", logpkg.SanitizePath(r.URL.Path)),
 						zap.Bool("allowed", allowed),
 					)
 				}

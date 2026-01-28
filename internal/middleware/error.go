@@ -2,9 +2,12 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"runtime/debug"
 	"time"
 
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"go.uber.org/zap"
 )
 
@@ -23,11 +26,20 @@ func ErrorHandler(logger *zap.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
+					// Convert panic value to string safely
+					var errStr string
+					if err != nil {
+						errStr = fmt.Sprintf("%v", err)
+					}
+
 					// Log panic details server-side but don't expose to client
+					// Include stack trace for debugging
 					logger.Error("panic_recovered",
-						zap.Any("error", err),
-						zap.String("path", r.URL.Path),
+						zap.String("operation", "http_request_handler"),
+						zap.String("error", logpkg.SanitizeErrorString(errStr)),
+						zap.String("path", logpkg.SanitizePath(r.URL.Path)),
 						zap.String("method", r.Method),
+						zap.String("stacktrace", string(debug.Stack())),
 					)
 					respondErrorJSON(w, r, http.StatusInternalServerError, "Internal Server Error", "An unexpected error occurred", logger)
 				}
@@ -52,10 +64,18 @@ func respondErrorJSON(w http.ResponseWriter, r *http.Request, status int, errorT
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		// Use fallback logging to avoid recursion if logger fails
+		// Write directly to response writer as last resort
+		if _, writeErr := w.Write([]byte(`{"success":false,"error":"Failed to encode error response"}`)); writeErr != nil {
+			// If even writing fails, there's nothing more we can do
+			_ = writeErr
+		}
 		logger.Error("failed_to_encode_error_response",
-			zap.Error(err),
+			zap.String("operation", "respond_error_json"),
+			zap.String("error", logpkg.SanitizeError(err)),
 			zap.Int("status_code", status),
-			zap.String("path", r.URL.Path),
+			zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+			zap.String("error_type", errorType),
 		)
 	}
 }

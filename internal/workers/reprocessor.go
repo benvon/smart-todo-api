@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -59,8 +60,8 @@ func (r *Reprocessor) ScheduleReprocessingJobs(ctx context.Context) error {
 		// Schedule morning job
 		if err := r.createReprocessingJob(ctx, userID, nextMorning); err != nil {
 			r.logger.Warn("failed_to_schedule_morning_reprocessing_job",
-				zap.String("user_id", userID.String()),
-				zap.Error(err),
+				zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			// Continue with other users
 		}
@@ -68,8 +69,8 @@ func (r *Reprocessor) ScheduleReprocessingJobs(ctx context.Context) error {
 		// Schedule evening job
 		if err := r.createReprocessingJob(ctx, userID, nextEvening); err != nil {
 			r.logger.Warn("failed_to_schedule_evening_reprocessing_job",
-				zap.String("user_id", userID.String()),
-				zap.Error(err),
+				zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
 			)
 			// Continue with other users
 		}

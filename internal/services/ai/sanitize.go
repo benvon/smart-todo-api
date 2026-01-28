@@ -4,6 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Context key types for logging (to avoid collisions with string keys)
@@ -50,33 +53,63 @@ func SanitizeAPIKey(apiKey string) string {
 }
 
 // SanitizePrompt creates a safe preview of a prompt for logging
+// Even in fullLog mode, we sanitize to prevent log injection and limit size
 func SanitizePrompt(prompt string, fullLog bool) string {
 	if prompt == "" {
 		return ""
 	}
+
+	maxLen := MaxPreviewLength
 	if fullLog {
-		return prompt
+		maxLen = 10000 // MaxDebugContentLength equivalent
 	}
-	// Return preview with truncation indicator
-	if len(prompt) <= MaxPreviewLength {
-		return prompt
-	}
-	return prompt[:MaxPreviewLength] + "..."
+
+	// Sanitize: remove control characters and validate UTF-8
+	sanitized := sanitizeStringForLogging(prompt, maxLen)
+	return sanitized
 }
 
 // SanitizeResponse creates a safe preview of a response for logging
+// Even in fullLog mode, we sanitize to prevent log injection and limit size
 func SanitizeResponse(response string, fullLog bool) string {
 	if response == "" {
 		return ""
 	}
+
+	maxLen := MaxPreviewLength
 	if fullLog {
-		return response
+		maxLen = 10000 // MaxDebugContentLength equivalent
 	}
-	// Return preview with truncation indicator
-	if len(response) <= MaxPreviewLength {
-		return response
+
+	// Sanitize: remove control characters and validate UTF-8
+	sanitized := sanitizeStringForLogging(response, maxLen)
+	return sanitized
+}
+
+// sanitizeStringForLogging removes control characters, validates UTF-8, and truncates
+func sanitizeStringForLogging(s string, maxLen int) string {
+	// Validate and fix UTF-8 encoding
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, "")
 	}
-	return response[:MaxPreviewLength] + "..."
+
+	// Remove control characters (except space, tab, newline, carriage return)
+	var builder strings.Builder
+	builder.Grow(len(s))
+	for _, r := range s {
+		// Allow printable characters, space, tab, newline, carriage return
+		if unicode.IsPrint(r) || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			builder.WriteRune(r)
+		}
+	}
+	s = builder.String()
+
+	// Truncate to max length
+	if len(s) > maxLen {
+		s = s[:maxLen] + "..."
+	}
+
+	return s
 }
 
 // HashUserID creates a hash of a user ID for logging (optional, for additional privacy)
@@ -97,13 +130,11 @@ func TruncateString(s string, maxLen int) string {
 }
 
 // SanitizeMessages creates sanitized previews of messages for logging
+// Even in fullLog mode, we sanitize to prevent log injection
 func SanitizeMessages(messages []string, fullLog bool) []string {
-	if fullLog {
-		return messages
-	}
 	sanitized := make([]string, 0, len(messages))
 	for _, msg := range messages {
-		sanitized = append(sanitized, SanitizePrompt(msg, false))
+		sanitized = append(sanitized, SanitizePrompt(msg, fullLog))
 	}
 	return sanitized
 }
