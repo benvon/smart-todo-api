@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15" version="29.3.6" pages="2">
   <diagram name="Process" id="kj8-H1u4PH7onFtzzLDC">
-    <mxGraphModel dx="882" dy="741" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="802" dy="574" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -59,21 +59,21 @@
     </mxGraphModel>
   </diagram>
   <diagram id="bSIlCMoj3zQi9mxXUXKj" name="Infra">
-    <mxGraphModel dx="882" dy="741" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="1163" dy="833" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-1" parent="1" style="sketch=0;html=1;aspect=fixed;strokeColor=none;shadow=0;fillColor=#3B8DF1;verticalAlign=top;labelPosition=center;verticalLabelPosition=bottom;shape=mxgraph.gcp2.website" value="SPA frontend" vertex="1">
-          <mxGeometry height="97" width="100" x="40" y="80" as="geometry" />
+          <mxGeometry height="97" width="100" x="60" y="300" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="API" vertex="1">
-          <mxGeometry height="60" width="120" x="281" y="187" as="geometry" />
+          <mxGeometry height="60" width="120" x="471" y="370" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Worker" vertex="1">
-          <mxGeometry height="60" width="120" x="449" y="187" as="geometry" />
+          <mxGeometry height="60" width="120" x="639" y="370" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-4" parent="1" style="points=[];aspect=fixed;html=1;align=center;shadow=0;dashed=0;fillColor=#FF6A00;strokeColor=none;shape=mxgraph.alibaba_cloud.mq_message_queue;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;" value="Message Queue" vertex="1">
-          <mxGeometry height="49.8" width="45" x="395" y="300" as="geometry" />
+          <mxGeometry height="49.8" width="45" x="585" y="483" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-5" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=-0.022;entryY=0.582;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-4">
           <mxGeometry relative="1" as="geometry" />
@@ -82,13 +82,13 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-7" parent="1" style="image;sketch=0;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/mscae/Cache_Redis_Product.svg;" value="Session &amp;amp; Rate limiting" vertex="1">
-          <mxGeometry height="42" width="50" x="260" y="300" as="geometry" />
+          <mxGeometry height="42" width="50" x="450" y="483" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-8" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-7">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-9" parent="1" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/databases/Azure_Database_PostgreSQL_Server.svg;" value="Database" vertex="1">
-          <mxGeometry height="64" width="48" x="401" y="410" as="geometry" />
+          <mxGeometry height="64" width="48" x="591" y="593" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-10" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.656;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-9">
           <mxGeometry relative="1" as="geometry" />
@@ -100,7 +100,22 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-12" parent="1" style="verticalLabelPosition=bottom;html=1;verticalAlign=top;align=center;strokeColor=none;fillColor=#00BEF2;shape=mxgraph.azure.load_balancer_generic;pointerEvents=1;" value="" vertex="1">
-          <mxGeometry height="50" width="37.5" x="323" y="100" as="geometry" />
+          <mxGeometry height="50" width="37.5" x="513" y="283" as="geometry" />
+        </mxCell>
+        <mxCell id="w6TOE-tXa2dVAkmYV_f2-3" edge="1" parent="1" source="w6TOE-tXa2dVAkmYV_f2-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=0;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;startArrow=classic;startFill=1;" target="1vAigvd1l-mQ3GnAVRFS-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="w6TOE-tXa2dVAkmYV_f2-1" parent="1" style="sketch=0;points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;fontColor=#232F3E;fillColor=#DD344C;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cognito;" value="AWS Cognito IdP" vertex="1">
+          <mxGeometry height="78" width="78" x="230" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="w6TOE-tXa2dVAkmYV_f2-2" edge="1" parent="1" source="w6TOE-tXa2dVAkmYV_f2-1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=0;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0.47;entryY=-0.01;entryDx=0;entryDy=0;entryPerimeter=0;startArrow=classic;startFill=1;" target="1vAigvd1l-mQ3GnAVRFS-1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="w6TOE-tXa2dVAkmYV_f2-4" parent="1" style="shape=actor;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="60" width="40" x="690" y="523" as="geometry" />
+        </mxCell>
+        <mxCell id="w6TOE-tXa2dVAkmYV_f2-5" parent="1" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=#232F3E;fillColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.user;" value="User" vertex="1">
+          <mxGeometry height="60" width="60" x="330" y="80" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
