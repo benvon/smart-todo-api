@@ -93,3 +93,29 @@ Tests follow Go conventions:
 - `t.Parallel()` for independent tests
 - Mock dependencies using interfaces or test doubles
 - Test both success and error paths
+
+## Manual Usability Testing
+
+While automated E2E tests are deferred (OIDC authentication blocks automation), the following manual checks should be performed to catch usability regressions:
+
+### Todo Edit & Tags
+
+These checks verify that editing todos and managing tags works smoothly without focus loss or unwanted refreshes:
+
+1. **Add-tag focus preservation**
+   - Edit a todo (click Edit button)
+   - Focus the "Add tag" input field
+   - Type a tag name and press Enter
+   - **Verify:** The tag is added AND the "Add tag" input still has focus (you can immediately type another tag without clicking back into the input)
+
+2. **No refresh under edit**
+   - Edit a todo (click Edit button)
+   - Focus the "Add tag" input (or any other field in the edit form)
+   - Wait **at least 5 seconds** (past one polling interval)
+   - **Verify:** You remain in edit mode, the focused field still has focus, and you can continue typing without re-focusing
+
+3. **Refresh after save** (optional)
+   - Edit a todo and save changes
+   - **Verify:** The list refreshes and shows updated status (e.g., "Processing..." if reprocessing was triggered)
+
+**Testing environment:** Run these checks against your local stack (e.g., using `docker-compose up` from the root directory).

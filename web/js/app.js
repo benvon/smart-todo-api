@@ -80,7 +80,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Start auto-refresh to show status updates
     // Refresh every 3 seconds to catch processing status changes
+    // Skip refresh if any todo is in edit mode to prevent focus loss
     setInterval(async () => {
+        // Don't refresh if user is editing a todo (prevents focus loss)
+        if (document.querySelector('.todo-edit-mode')) {
+            return;
+        }
         await loadTodos();
     }, 3000);
 });
@@ -958,21 +963,14 @@ async function handleEditTodo(id, todoEl, todo) {
     tagsDiv.style.gap = '6px';
     tagsDiv.style.marginBottom = '10px';
 
-    // Render existing tags
-    workingTags.forEach(tag => {
-        const tagChip = createTagChip(tag, workingTagSources[tag] === 'ai', () => {
-            // Remove tag handler
-            const index = workingTags.indexOf(tag);
-            if (index > -1) {
-                workingTags.splice(index, 1);
-                delete workingTagSources[tag];
-                renderTagsEditor(tagsDiv, workingTags, workingTagSources);
-            }
-        });
-        tagsDiv.appendChild(tagChip);
-    });
+    // Create separate container for chips (will be cleared/rebuilt)
+    const chipsContainer = document.createElement('div');
+    chipsContainer.style.display = 'flex';
+    chipsContainer.style.flexWrap = 'wrap';
+    chipsContainer.style.gap = '6px';
+    tagsDiv.appendChild(chipsContainer);
 
-    // Add tag input
+    // Add tag input (never cleared, preserves focus)
     const addTagInput = document.createElement('input');
     addTagInput.type = 'text';
     addTagInput.className = 'todo-tags-input';
@@ -984,12 +982,15 @@ async function handleEditTodo(id, todoEl, todo) {
                 workingTags.push(tagName);
                 workingTagSources[tagName] = 'user';
                 addTagInput.value = '';
-                renderTagsEditor(tagsDiv, workingTags, workingTagSources);
+                renderTagsEditor(chipsContainer, workingTags, workingTagSources);
             }
         }
     });
     tagsDiv.appendChild(addTagInput);
     tagsContainer.appendChild(tagsDiv);
+
+    // Render existing tags
+    renderTagsEditor(chipsContainer, workingTags, workingTagSources);
 
     // Due date editor
     const dueDateContainer = document.createElement('div');
@@ -1041,6 +1042,7 @@ async function handleEditTodo(id, todoEl, todo) {
     textInput.select();
 
     // Helper function to render tags editor
+    // Only rebuilds chips container; addTagInput is preserved separately to maintain focus
     function renderTagsEditor(container, tags, tagSources) {
         container.innerHTML = '';
         tags.forEach(tag => {
@@ -1054,7 +1056,8 @@ async function handleEditTodo(id, todoEl, todo) {
             });
             container.appendChild(tagChip);
         });
-        container.appendChild(addTagInput);
+        // Note: addTagInput is not appended here - it lives outside this container
+        // to preserve focus when tags are added/removed
     }
 }
 
