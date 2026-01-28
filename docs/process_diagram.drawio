@@ -67,13 +67,13 @@
           <mxGeometry height="97" width="100" x="40" y="80" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="API" vertex="1">
-          <mxGeometry height="60" width="120" x="281" y="117" as="geometry" />
+          <mxGeometry height="60" width="120" x="281" y="187" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Worker" vertex="1">
-          <mxGeometry height="60" width="120" x="449" y="117" as="geometry" />
+          <mxGeometry height="60" width="120" x="449" y="187" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-4" parent="1" style="points=[];aspect=fixed;html=1;align=center;shadow=0;dashed=0;fillColor=#FF6A00;strokeColor=none;shape=mxgraph.alibaba_cloud.mq_message_queue;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;" value="Message Queue" vertex="1">
-          <mxGeometry height="49.8" width="45" x="395" y="230" as="geometry" />
+          <mxGeometry height="49.8" width="45" x="395" y="300" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-5" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=-0.022;entryY=0.582;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-4">
           <mxGeometry relative="1" as="geometry" />
@@ -82,19 +82,25 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-7" parent="1" style="image;sketch=0;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/mscae/Cache_Redis_Product.svg;" value="Session &amp;amp; Rate limiting" vertex="1">
-          <mxGeometry height="42" width="50" x="260" y="230" as="geometry" />
+          <mxGeometry height="42" width="50" x="260" y="300" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-8" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-7">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-9" parent="1" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/databases/Azure_Database_PostgreSQL_Server.svg;" value="Database" vertex="1">
-          <mxGeometry height="64" width="48" x="401" y="340" as="geometry" />
+          <mxGeometry height="64" width="48" x="401" y="410" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-10" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.656;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-9">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="1vAigvd1l-mQ3GnAVRFS-11" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=1;entryY=0.672;entryDx=0;entryDy=0;entryPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-9">
           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-13" edge="1" parent="1" source="1vAigvd1l-mQ3GnAVRFS-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.49;exitY=1;exitDx=0;exitDy=0;exitPerimeter=0;" target="1vAigvd1l-mQ3GnAVRFS-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="1vAigvd1l-mQ3GnAVRFS-12" parent="1" style="verticalLabelPosition=bottom;html=1;verticalAlign=top;align=center;strokeColor=none;fillColor=#00BEF2;shape=mxgraph.azure.load_balancer_generic;pointerEvents=1;" value="" vertex="1">
+          <mxGeometry height="50" width="37.5" x="323" y="100" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
