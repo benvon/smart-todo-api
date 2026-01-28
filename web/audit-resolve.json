@@ -15,6 +15,36 @@
       "decision": "ignore",
       "madeAt": 1737657600000,
       "reason": "Vulnerability in transitive dependency undici via @actions/http-client. Application uses native browser fetch() API, not Node.js fetch, so vulnerable code path is not executed at runtime. @actions/http-client is not imported in source code (verified by scripts/verify-unused-deps.js)."
+    },
+    "1112659|npm>tar": {
+      "decision": "ignore",
+      "madeAt": 1738108800000,
+      "reason": "Vulnerability in tar package (GHSA-34x7-hfp2-rc4v) via npm transitive dependency. This affects @semantic-release/npm which uses npm as a dependency. tar is only used during CI/CD package installation and release processes, not at runtime. The application does not use tar directly and this vulnerability does not affect production builds or runtime execution."
+    },
+    "semantic-release|@semantic-release/commit-analyzer": {
+      "decision": "ignore",
+      "madeAt": 1738108800000,
+      "reason": "Vulnerability flagged in semantic-release and plugins. These are dev dependencies used only in CI/CD for automated releases. They do not affect production builds or runtime execution. Downgrading would reintroduce peer dependency conflicts that prevent npm install from succeeding."
+    },
+    "semantic-release|@semantic-release/github": {
+      "decision": "ignore",
+      "madeAt": 1738108800000,
+      "reason": "Vulnerability flagged in semantic-release and plugins. These are dev dependencies used only in CI/CD for automated releases. They do not affect production builds or runtime execution. Downgrading would reintroduce peer dependency conflicts that prevent npm install from succeeding."
+    },
+    "semantic-release|@semantic-release/npm": {
+      "decision": "ignore",
+      "madeAt": 1738108800000,
+      "reason": "Vulnerability flagged in semantic-release and plugins. These are dev dependencies used only in CI/CD for automated releases. They do not affect production builds or runtime execution. Downgrading would reintroduce peer dependency conflicts that prevent npm install from succeeding."
+    },
+    "semantic-release|@semantic-release/release-notes-generator": {
+      "decision": "ignore",
+      "madeAt": 1738108800000,
+      "reason": "Vulnerability flagged in semantic-release and plugins. These are dev dependencies used only in CI/CD for automated releases. They do not affect production builds or runtime execution. Downgrading would reintroduce peer dependency conflicts that prevent npm install from succeeding."
+    },
+    "semantic-release|semantic-release": {
+      "decision": "ignore",
+      "madeAt": 1738108800000,
+      "reason": "Vulnerability flagged in semantic-release. This is a dev dependency used only in CI/CD for automated releases. It does not affect production builds or runtime execution. Downgrading would reintroduce peer dependency conflicts that prevent npm install from succeeding."
     }
   }
 }
