@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/benvon/smart-todo/internal/config"
 	"github.com/benvon/smart-todo/internal/database"
@@ -113,6 +114,24 @@ func main() {
 		zapLogger,
 	)
 
+	// Create tag analyzer
+	tagAnalyzer := workers.NewTagAnalyzer(
+		todoRepo,
+		tagStatsRepo,
+		zapLogger,
+	)
+
+	// Create reprocessor for scheduled reprocessing
+	reprocessor := workers.NewReprocessor(
+		jobQueue,
+		activityRepo,
+		zapLogger,
+	)
+
+	// Create garbage collector for job cleanup
+	// Run every hour, retain jobs for 24 hours
+	gc := queue.NewGarbageCollector(jobQueue, 1*time.Hour, 24*time.Hour)
+
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -129,6 +148,42 @@ func main() {
 
 	zapLogger.Info("Worker started, consuming messages from queue")
 
+	// Start garbage collector
+	go func() {
+		if err := gc.Start(ctx); err != nil && err != context.Canceled {
+			zapLogger.Error("Garbage collector stopped with error", zap.Error(err))
+		}
+	}()
+	zapLogger.Info("Started garbage collector",
+		zap.Duration("interval", 1*time.Hour),
+		zap.Duration("retention", 24*time.Hour),
+	)
+
+	// Start reprocessor scheduler (runs every 12 hours)
+	go func() {
+		ticker := time.NewTicker(12 * time.Hour)
+		defer ticker.Stop()
+
+		// Run once at startup
+		if err := reprocessor.ScheduleReprocessingJobs(ctx); err != nil {
+			zapLogger.Error("Failed to schedule initial reprocessing jobs", zap.Error(err))
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := reprocessor.ScheduleReprocessingJobs(ctx); err != nil {
+					zapLogger.Error("Failed to schedule reprocessing jobs", zap.Error(err))
+				}
+			}
+		}
+	}()
+	zapLogger.Info("Started reprocessing scheduler",
+		zap.Duration("interval", 12*time.Hour),
+	)
+
 	// Process messages
 	go func() {
 		for {
@@ -141,12 +196,35 @@ func main() {
 					return
 				}
 
-				// Process job
-				if err := analyzer.ProcessJob(ctx, msg); err != nil {
+				job := msg.GetJob()
+				
+				// Route job to appropriate analyzer based on type
+				var err error
+				switch job.Type {
+				case queue.JobTypeTagAnalysis:
+					err = tagAnalyzer.ProcessJob(ctx, msg)
+				case queue.JobTypeTaskAnalysis, queue.JobTypeReprocessUser:
+					err = analyzer.ProcessJob(ctx, msg)
+				default:
+					zapLogger.Error("Unknown job type",
+						zap.String("job_id", job.ID.String()),
+						zap.String("job_type", string(job.Type)),
+					)
+					// Nack unknown job types
+					if nackErr := msg.Nack(false); nackErr != nil {
+						zapLogger.Error("Failed to nack unknown job type",
+							zap.String("job_id", job.ID.String()),
+							zap.Error(nackErr),
+						)
+					}
+					continue
+				}
+
+				if err != nil {
 					zapLogger.Error("Failed to process job",
 						zap.Error(err),
-						zap.String("job_id", msg.GetJob().ID.String()),
-						zap.String("job_type", string(msg.GetJob().Type)),
+						zap.String("job_id", job.ID.String()),
+						zap.String("job_type", string(job.Type)),
 					)
 				}
 			}
