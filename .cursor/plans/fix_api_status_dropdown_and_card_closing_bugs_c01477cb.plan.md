@@ -97,11 +97,12 @@ This plan addresses three issues:
 
 ## Testing Checklist
 
-- [ ] API status dropdown opens/closes correctly
-- [ ] Extended health info displays correctly and updates in real-time
-- [ ] Profile context loads correctly (even when empty)
-- [ ] Profile context saves successfully without "failed to fetch" error
-- [ ] Todo edit cards don't close on focus changes
-- [ ] Profile panel doesn't close when clicking inside content
-- [ ] Save/Cancel buttons work correctly for todo editing
-- [ ] Due date editing still works with Enter/Escape keys
+- API status dropdown opens/closes correctly
+- Extended health info displays correctly and updates in real-time
+- Profile context loads correctly (even when empty)
+- Profile context saves successfully without "failed to fetch" error
+- Todo edit cards don't close on focus changes
+- Profile panel doesn't close when clicking inside content
+- Save/Cancel buttons work correctly for todo editing
+- Due date editing still works with Enter/Escape keys
+

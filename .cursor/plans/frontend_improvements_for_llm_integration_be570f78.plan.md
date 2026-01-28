@@ -80,7 +80,6 @@ All backend and frontend features are implemented:
   - ✅ JobTypeTagAnalysis added to `job.go`
   - ✅ AI Context API handlers
   - ✅ Routes registered and OpenAPI spec updated
-
 - **Frontend**:
   - ✅ All API client functions
   - ✅ User profile panel
@@ -92,31 +91,20 @@ All backend and frontend features are implemented:
 **Most tests are stubs/skipped** and need implementation:
 
 1. **Tag Statistics Repository Tests** (`tag_statistics_test.go`):
-
-   - ❌ All tests skipped with `t.Skip()` - need database setup (testcontainers or integration test setup)
-   - ✅ Mock structure exists and follows best practices
-
+  - ❌ All tests skipped with `t.Skip()` - need database setup (testcontainers or integration test setup)
+  - ✅ Mock structure exists and follows best practices
 2. **Tag Analyzer Worker Tests** (`tag_analyzer_test.go`):
-
-   - ✅ Basic functionality tests implemented (success, tainted cleared, version conflict, empty tags, completed todos, debouncing, invalid job type)
-   - ❌ Missing race condition tests (concurrent workers, concurrent updates during analysis)
-
+  - ✅ Basic functionality tests implemented (success, tainted cleared, version conflict, empty tags, completed todos, debouncing, invalid job type)
+  - ❌ Missing race condition tests (concurrent workers, concurrent updates during analysis)
 3. **Tainted Marking Tests** (`todos_test.go`):
-
-   - ❌ All tests skipped - need handler integration test setup
-
+  - ❌ All tests skipped - need handler integration test setup
 4. **AI Context API Tests** (`ai_context_test.go`):
-
-   - ✅ Unauthorized test implemented
-   - ❌ All other tests skipped - need database setup
-
+  - ✅ Unauthorized test implemented
+  - ❌ All other tests skipped - need database setup
 5. **Tag Stats API Tests** (`todos_test.go`):
-
-   - ❌ Test skipped - need handler integration test setup
-
+  - ❌ Test skipped - need handler integration test setup
 6. **Race Condition Integration Tests**:
-
-   - ❌ No race condition tests found - need to be created
+  - ❌ No race condition tests found - need to be created
 
 ### Next Steps
 
@@ -189,22 +177,22 @@ Create `tag_statistics` table:
 - Atomically set `tainted = true` if currently false
 - Only queue job if transition occurred (atomic operation returned row)
 
-2. **Queue Analysis Job**:
+1. **Queue Analysis Job**:
 
 - Check if `JobTypeTagAnalysis` job already exists for user_id
 - If not, create job with `NotBefore = now + 5 seconds` (debounce)
 - Job type: `JobTypeTagAnalysis` (add to `internal/queue/job.go`)
 
-3. **Process Analysis Job** (`internal/workers/tag_analyzer.go`):
+1. **Process Analysis Job** (`internal/workers/tag_analyzer.go`):
 
 - Load all todos for user
 - Aggregate tags from `metadata.category_tags` and `metadata.tag_sources`
 - Compute statistics (total count, AI count, user count per tag)
 - Atomically update `tag_statistics` table:
- - Set `tag_stats` JSONB
- - Set `tainted = false`
- - Update `last_analyzed_at`
- - Increment `analysis_version`
+- Set `tag_stats` JSONB
+- Set `tainted = false`
+- Update `last_analyzed_at`
+- Increment `analysis_version`
 - Use transaction to ensure atomicity
 
 **Files to create/modify:**
@@ -567,21 +555,21 @@ func (m *mockTagStatisticsRepo) VerifyGetByUserIDCalled(times int, userID uuid.U
 
 ### Phase 2: Frontend Features
 
-6. Frontend: API client functions
-7. Frontend: User Profile Panel
-8. Frontend: Todo Editing UI
-9. Frontend: Chat Context Integration
+1. Frontend: API client functions
+2. Frontend: User Profile Panel
+3. Frontend: Todo Editing UI
+4. Frontend: Chat Context Integration
 
 ### Phase 3: Testing
 
-10. Backend: Tag Statistics Repository tests (unit tests with meaningful mocks)
-11. Backend: Tag Analyzer Worker tests (unit + integration tests, race conditions)
-12. Backend: Tainted marking logic tests (unit tests)
-13. Backend: AI Context API tests (handler tests, positive + negative)
-14. Backend: Tag Statistics API tests (handler tests)
-15. Backend: Race condition integration tests (concurrent scenarios)
-16. Frontend: API client function tests (if applicable)
-17. End-to-end testing and verification
+1. Backend: Tag Statistics Repository tests (unit tests with meaningful mocks)
+2. Backend: Tag Analyzer Worker tests (unit + integration tests, race conditions)
+3. Backend: Tainted marking logic tests (unit tests)
+4. Backend: AI Context API tests (handler tests, positive + negative)
+5. Backend: Tag Statistics API tests (handler tests)
+6. Backend: Race condition integration tests (concurrent scenarios)
+7. Frontend: API client function tests (if applicable)
+8. End-to-end testing and verification
 
 ## Race Condition Handling Details
 
@@ -681,3 +669,4 @@ RETURNING user_id;
 - Check `tainted` flag before saving results (if false, another update occurred, skip save)
 - Use `analysis_version` to detect concurrent updates
 - Atomic update: `UPDATE tag_statistics SET tag_stats = $1, tainted = false, analysis_version = analysis_version + 1 WHERE user_id = $2 AND analysis_version = $3`
+

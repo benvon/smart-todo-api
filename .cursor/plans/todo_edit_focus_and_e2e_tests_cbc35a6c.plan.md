@@ -85,10 +85,12 @@ Once OIDC can be bypassed or mocked (test provider, env flag, etc.), add Playwri
 
 ## Summary
 
-| Issue | Cause | Fix |
-|-------|--------|-----|
-| "Refresh under me" / lose focus while editing | 3s `loadTodos` → `renderTodos` clears lists, removes edit card from DOM | Skip refresh when `.todo-edit-mode` exists |
-| Lose focus when adding a tag | `renderTagsEditor` uses `innerHTML = ''`, nukes add-tag input | Keep input in separate container (Option B) or `addTagInput.focus()` after re-append (Option A) |
-| Verification | No E2E (OIDC blocks automation) | Manual checklist in TESTING.md; automated E2E deferred until auth can be bypassed/mocked |
+
+| Issue                                         | Cause                                                                   | Fix                                                                                             |
+| --------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| "Refresh under me" / lose focus while editing | 3s `loadTodos` → `renderTodos` clears lists, removes edit card from DOM | Skip refresh when `.todo-edit-mode` exists                                                      |
+| Lose focus when adding a tag                  | `renderTagsEditor` uses `innerHTML = ''`, nukes add-tag input           | Keep input in separate container (Option B) or `addTagInput.focus()` after re-append (Option A) |
+| Verification                                  | No E2E (OIDC blocks automation)                                         | Manual checklist in TESTING.md; automated E2E deferred until auth can be bypassed/mocked        |
+
 
 These changes fix the behavior you're seeing. A manual checklist keeps edit/tag flows consistently verified; Playwright E2E can be added later when OIDC is testable.
