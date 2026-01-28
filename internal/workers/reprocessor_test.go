@@ -12,6 +12,7 @@ import (
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // contains checks if a string contains a substring (case-insensitive)
@@ -23,9 +24,9 @@ func contains(s, substr string) bool {
 type mockJobQueueForReprocessor struct {
 	t           *testing.T
 	enqueueFunc func(ctx context.Context, job *queue.Job) error
-	
+
 	// Call tracking (protected by mutex for concurrent access)
-	mu          sync.Mutex
+	mu           sync.Mutex
 	enqueueCalls []*queue.Job
 }
 
@@ -60,13 +61,13 @@ var _ queue.JobQueue = (*mockJobQueueForReprocessor)(nil)
 
 // mockUserActivityRepoForReprocessor is a mock implementation of UserActivityRepositoryInterface for reprocessor tests
 type mockUserActivityRepoForReprocessor struct {
-	t                                  *testing.T
-	getByUserIDFunc                    func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
+	t                                   *testing.T
+	getByUserIDFunc                     func(ctx context.Context, userID uuid.UUID) (*models.UserActivity, error)
 	getEligibleUsersForReprocessingFunc func(ctx context.Context) ([]uuid.UUID, error)
-	
+
 	// Call tracking (protected by mutex for concurrent access)
-	mu                                  sync.Mutex
-	getByUserIDCalls                    []uuid.UUID
+	mu                                   sync.Mutex
+	getByUserIDCalls                     []uuid.UUID
 	getEligibleUsersForReprocessingCalls int
 }
 
@@ -185,7 +186,7 @@ func TestReprocessor_ScheduleReprocessingJobs(t *testing.T) {
 			jobQueue.t = t
 			activityRepo.t = t
 
-			reprocessor := NewReprocessor(jobQueue, activityRepo)
+			reprocessor := NewReprocessor(jobQueue, activityRepo, zap.NewNop())
 
 			err := reprocessor.ScheduleReprocessingJobs(context.Background())
 
@@ -266,7 +267,7 @@ func TestReprocessor_GetEligibleUsers(t *testing.T) {
 			activityRepo.t = t
 			jobQueue := &mockJobQueueForReprocessor{}
 			jobQueue.t = t
-			reprocessor := NewReprocessor(jobQueue, activityRepo)
+			reprocessor := NewReprocessor(jobQueue, activityRepo, zap.NewNop())
 
 			got, err := reprocessor.GetEligibleUsers(context.Background())
 
@@ -366,7 +367,7 @@ func TestReprocessor_createReprocessingJob(t *testing.T) {
 			jobQueue.t = t
 			activityRepo := &mockUserActivityRepoForReprocessor{}
 			activityRepo.t = t
-			reprocessor := NewReprocessor(jobQueue, activityRepo)
+			reprocessor := NewReprocessor(jobQueue, activityRepo, zap.NewNop())
 
 			err := reprocessor.createReprocessingJob(context.Background(), tt.userID, tt.notBefore)
 

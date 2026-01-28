@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 const (
@@ -25,11 +25,17 @@ type TodoRepository struct {
 	db               *DB
 	tagStatsRepo     TagStatisticsRepositoryInterface // Optional: for automatic tag change detection
 	tagChangeHandler TagChangeHandler                 // Optional: callback when tags change
+	logger           *zap.Logger                      // Optional: for structured logging
 }
 
 // NewTodoRepository creates a new todo repository
 func NewTodoRepository(db *DB) *TodoRepository {
 	return &TodoRepository{db: db}
+}
+
+// SetLogger sets the logger for the repository
+func (r *TodoRepository) SetLogger(logger *zap.Logger) {
+	r.logger = logger
 }
 
 // SetTagChangeHandler sets a callback to be invoked when tags change
@@ -254,16 +260,13 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags 
 	if r.tagStatsRepo != nil && oldTags != nil {
 		// Compare tags using tagsEqual which handles nil normalization
 		tagsChanged = !tagsEqual(oldTags, todo.Metadata.CategoryTags)
-		if tagsChanged {
-			log.Printf("Tag change detected for todo %s (user %s): old=%v, new=%v", todo.ID, todo.UserID, oldTags, todo.Metadata.CategoryTags)
-		} else {
-			log.Printf("No tag change for todo %s (user %s): tags=%v", todo.ID, todo.UserID, todo.Metadata.CategoryTags)
-		}
-	} else {
-		if r.tagStatsRepo == nil {
-			log.Printf("Tag stats repo not configured for todo repository, skipping tag change detection")
-		} else {
-			log.Printf("Old tags not provided for todo %s, skipping tag change detection", todo.ID)
+		if tagsChanged && r.logger != nil {
+			r.logger.Debug("tag_change_detected",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", todo.UserID.String()),
+				zap.Strings("old_tags", oldTags),
+				zap.Strings("new_tags", todo.Metadata.CategoryTags),
+			)
 		}
 	}
 
@@ -310,16 +313,28 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags 
 
 	// If tags changed, invoke the tag change handler
 	if tagsChanged && r.tagChangeHandler != nil {
-		log.Printf("Invoking tag change handler for user %s (todo %s)", todo.UserID, todo.ID)
+		if r.logger != nil {
+			r.logger.Debug("invoking_tag_change_handler",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", todo.UserID.String()),
+			)
+		}
 		if err := r.tagChangeHandler(ctx, todo.UserID); err != nil {
 			// Log error but don't fail the update
 			// Tag analysis can happen later
-			log.Printf("Tag change handler failed for user %s: %v", todo.UserID, err)
-		} else {
-			log.Printf("Tag change handler completed successfully for user %s", todo.UserID)
+			if r.logger != nil {
+				r.logger.Warn("tag_change_handler_failed",
+					zap.String("user_id", todo.UserID.String()),
+					zap.String("todo_id", todo.ID.String()),
+					zap.Error(err),
+				)
+			}
+		} else if r.logger != nil {
+			r.logger.Debug("tag_change_handler_completed",
+				zap.String("user_id", todo.UserID.String()),
+				zap.String("todo_id", todo.ID.String()),
+			)
 		}
-	} else if tagsChanged && r.tagChangeHandler == nil {
-		log.Printf("Tags changed for todo %s but no tag change handler configured", todo.ID)
 	}
 
 	return nil
@@ -349,12 +364,10 @@ func tagsEqual(a, b []string) bool {
 	mapA := make(map[string]int)
 	mapB := make(map[string]int)
 
-	// Track seen tags to detect and warn about duplicates
+	// Track seen tags to detect duplicates (silently handle duplicates)
 	seenA := make(map[string]struct{})
 	for _, tag := range a {
-		if _, exists := seenA[tag]; exists {
-			log.Printf("tagsEqual: duplicate tag %q detected in first tag slice", tag)
-		} else {
+		if _, exists := seenA[tag]; !exists {
 			seenA[tag] = struct{}{}
 		}
 		mapA[tag]++
@@ -362,9 +375,7 @@ func tagsEqual(a, b []string) bool {
 
 	seenB := make(map[string]struct{})
 	for _, tag := range b {
-		if _, exists := seenB[tag]; exists {
-			log.Printf("tagsEqual: duplicate tag %q detected in second tag slice", tag)
-		} else {
+		if _, exists := seenB[tag]; !exists {
 			seenB[tag] = struct{}{}
 		}
 		mapB[tag]++

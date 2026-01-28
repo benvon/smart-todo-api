@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestErrorHandler_NoPanic(t *testing.T) {
@@ -15,7 +17,7 @@ func TestErrorHandler_NoPanic(t *testing.T) {
 		_, _ = w.Write([]byte("OK")) // Ignore error in test
 	})
 
-	middleware := ErrorHandler(handler)
+	middleware := ErrorHandler(zap.NewNop())(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -39,7 +41,7 @@ func TestErrorHandler_PanicRecovery(t *testing.T) {
 		panic("test panic")
 	})
 
-	middleware := ErrorHandler(handler)
+	middleware := ErrorHandler(zap.NewNop())(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -96,7 +98,7 @@ func TestErrorHandler_PanicWithNil(t *testing.T) {
 		nilMap["key"] = "value" // This will panic
 	})
 
-	middleware := ErrorHandler(handler)
+	middleware := ErrorHandler(zap.NewNop())(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()

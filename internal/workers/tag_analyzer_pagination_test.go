@@ -7,6 +7,7 @@ import (
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // TestTagAnalyzer_ProcessTagAnalysisJob_LoadsAllPages tests that the analyzer
@@ -15,7 +16,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_LoadsAllPages(t *testing.T) {
 	t.Parallel()
 
 	userID := uuid.New()
-	
+
 	// Create 750 todos (more than one page of 500)
 	allTodos := make([]*models.Todo, 750)
 	for i := 0; i < 750; i++ {
@@ -43,7 +44,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_LoadsAllPages(t *testing.T) {
 			if end > len(allTodos) {
 				end = len(allTodos)
 			}
-			
+
 			// Return the appropriate page
 			pageTodos := allTodos[offset:end]
 			return pageTodos, len(allTodos), nil
@@ -71,7 +72,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_LoadsAllPages(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -181,7 +182,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_IncludesCompletedTodosInStats(t *test
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),

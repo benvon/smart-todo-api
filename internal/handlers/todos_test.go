@@ -14,6 +14,7 @@ import (
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 // TestCreateTodo_TimeEnteredLogic tests that TimeEntered is set correctly when creating todos
@@ -174,7 +175,7 @@ func TestTodoHandler_GetTagStats_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil)
+	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil, zap.NewNop())
 
 	user := &models.User{
 		ID:    userID,
@@ -222,7 +223,7 @@ func TestTodoHandler_GetTagStats_Success(t *testing.T) {
 func TestTodoHandler_GetTagStats_Unauthorized(t *testing.T) {
 	t.Parallel()
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, nil, nil)
+	handler := NewTodoHandlerWithQueueAndTagStats(nil, nil, nil, zap.NewNop())
 
 	req := httptest.NewRequest("GET", "/api/v1/todos/tags/stats", nil)
 	// No user in context
@@ -246,7 +247,7 @@ func TestTodoHandler_GetTagStats_DatabaseError(t *testing.T) {
 		},
 	}
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil)
+	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil, zap.NewNop())
 
 	user := &models.User{
 		ID:    userID,
@@ -289,7 +290,7 @@ func TestTodoHandler_GetTagStats_StaleData(t *testing.T) {
 		},
 	}
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil)
+	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil, zap.NewNop())
 
 	user := &models.User{
 		ID:    userID,
@@ -376,7 +377,7 @@ func TestTodoHandler_GetTagStats_RouteNotRegisteredWhenNil(t *testing.T) {
 
 	// Create handler without tagStatsRepo (like NewTodoHandler or NewTodoHandlerWithQueue)
 	mockTodoRepo := &database.TodoRepository{} // Minimal mock
-	handler := NewTodoHandler(mockTodoRepo)
+	handler := NewTodoHandler(mockTodoRepo, zap.NewNop())
 
 	// Register routes
 	router := mux.NewRouter()
@@ -404,7 +405,7 @@ func TestTodoHandler_GetTagStats_DefensiveNilCheck(t *testing.T) {
 
 	// Create handler without tagStatsRepo
 	mockTodoRepo := &database.TodoRepository{} // Minimal mock
-	handler := NewTodoHandler(mockTodoRepo)
+	handler := NewTodoHandler(mockTodoRepo, zap.NewNop())
 
 	// Directly call GetTagStats (bypassing route registration)
 	req := httptest.NewRequest("GET", "/api/v1/todos/tags/stats", nil)

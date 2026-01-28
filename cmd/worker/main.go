@@ -2,8 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -12,41 +11,57 @@ import (
 
 	"github.com/benvon/smart-todo/internal/config"
 	"github.com/benvon/smart-todo/internal/database"
-	"github.com/benvon/smart-todo/internal/middleware"
+	"github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/benvon/smart-todo/internal/workers"
-	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 func main() {
+	// Parse command-line flags
+	debugFlag := flag.Bool("debug", false, "Enable debug mode for LLM API logging")
+	flag.Parse()
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Connect to database
-	db, err := database.New(cfg.DatabaseURL)
+	// Override debug mode if flag is set
+	debugMode := cfg.WorkerDebugMode || *debugFlag
+
+	// Initialize logger
+	zapLogger, err := logger.NewProductionLogger(debugMode)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 	defer func() {
-		if err := db.Close(); err != nil {
-			log.Printf("Failed to close database connection: %v", err)
+		if syncErr := zapLogger.Sync(); syncErr != nil {
+			// Ignore sync errors in production
+			_ = syncErr
 		}
 	}()
 
-	// Connect to RabbitMQ
-	jobQueue, err := queue.NewRabbitMQQueue(cfg.RabbitMQURL)
+	zapLogger.Info("Starting worker",
+		zap.Bool("debug_mode", debugMode),
+		zap.String("ai_provider", cfg.AIProvider),
+		zap.String("ai_model", cfg.AIModel),
+	)
+
+	// Initialize database connection
+	db, err := database.New(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		zapLogger.Fatal("Failed to connect to database", zap.Error(err))
 	}
 	defer func() {
-		if err := jobQueue.Close(); err != nil {
-			log.Printf("Failed to close RabbitMQ connection: %v", err)
+		if err := db.Close(); err != nil {
+			zapLogger.Warn("Failed to close database connection", zap.Error(err))
 		}
 	}()
+
+	zapLogger.Info("Connected to database")
 
 	// Initialize repositories
 	todoRepo := database.NewTodoRepository(db)
@@ -54,135 +69,136 @@ func main() {
 	activityRepo := database.NewUserActivityRepository(db)
 	tagStatsRepo := database.NewTagStatisticsRepository(db)
 
-	// Set up automatic tag change detection in todo repository
-	todoRepo.SetTagStatsRepo(tagStatsRepo)
-	todoRepo.SetTagChangeHandler(func(ctx context.Context, userID uuid.UUID) error {
-		log.Printf("Tag change handler invoked for user %s", userID)
-		
-		// Attempt to mark tag statistics as tainted (ensures stats will be refreshed)
-		var markTaintedErr error
-		_, err := tagStatsRepo.MarkTainted(ctx, userID)
-		if err != nil {
-			log.Printf("Failed to mark tag statistics as tainted for user %s: %v", userID, err)
-			markTaintedErr = err
-			// Continue to enqueue the job despite this error to avoid inconsistent state
-		}
-		
-		// Always enqueue tag analysis job when tags change, even if MarkTainted failed
-		// The job will eventually fix the tainted state, allowing the system to self-heal
-		// Multiple jobs are fine - the analyzer will process them and re-analyze all todos
-		if jobQueue != nil {
-			tagJob := queue.NewJob(queue.JobTypeTagAnalysis, userID, nil)
-			debounceDelay := 5 * time.Second
-			notBefore := time.Now().Add(debounceDelay)
-			tagJob.NotBefore = &notBefore
-			if err := jobQueue.Enqueue(ctx, tagJob); err != nil {
-				log.Printf("Failed to enqueue tag analysis job for user %s: %v", userID, err)
-				// If both operations failed, return combined error
-				if markTaintedErr != nil {
-					return errors.Join(markTaintedErr, fmt.Errorf("failed to enqueue tag analysis job: %w", err))
-				}
-				return fmt.Errorf("failed to enqueue tag analysis job: %w", err)
-			}
-			log.Printf("Enqueued tag analysis job for user %s (debounced by %v) due to tag change", userID, debounceDelay)
-		} else {
-			log.Printf("Job queue not available, cannot enqueue tag analysis job for user %s", userID)
-		}
-		
-		// If only MarkTainted failed but job was enqueued successfully, ignore the error
-		// The enqueued job will eventually update statistics and fix the tainted state
-		return nil
-	})
-
-	// Initialize AI provider
-	aiProvider, err := createAIProvider(cfg)
+	// Initialize RabbitMQ queue
+	jobQueue, err := queue.NewRabbitMQQueue(cfg.RabbitMQURL)
 	if err != nil {
-		log.Fatalf("Failed to create AI provider: %v", err)
+		zapLogger.Fatal("Failed to connect to RabbitMQ", zap.Error(err))
+	}
+	defer func() {
+		if err := jobQueue.Close(); err != nil {
+			zapLogger.Warn("Failed to close RabbitMQ connection", zap.Error(err))
+		}
+	}()
+
+	zapLogger.Info("Connected to RabbitMQ",
+		zap.Int("prefetch", cfg.RabbitMQPrefetch),
+	)
+
+	// Create AI provider with logger
+	var aiProvider ai.AIProvider
+	if cfg.AIProvider == "openai" {
+		aiProvider = ai.NewOpenAIProviderWithLogger(
+			cfg.OpenAIKey,
+			cfg.AIBaseURL,
+			cfg.AIModel,
+			zapLogger,
+			debugMode,
+		)
+	} else {
+		zapLogger.Fatal("Unsupported AI provider", zap.String("provider", cfg.AIProvider))
 	}
 
-	// Initialize workers
-	analyzer := workers.NewTaskAnalyzer(aiProvider, todoRepo, contextRepo, activityRepo, tagStatsRepo, jobQueue)
-	reprocessor := workers.NewReprocessor(jobQueue, activityRepo)
-	tagAnalyzer := workers.NewTagAnalyzer(todoRepo, tagStatsRepo)
+	zapLogger.Info("Initialized AI provider",
+		zap.String("provider", cfg.AIProvider),
+		zap.String("model", cfg.AIModel),
+	)
 
-	// Start garbage collector
-	gc := queue.NewGarbageCollector(jobQueue, 1*time.Hour, 7*24*time.Hour)
-	gcCtx, gcCancel := context.WithCancel(context.Background())
-	defer gcCancel()
-	go func() {
-		if err := gc.Start(gcCtx); err != nil && err != context.Canceled {
-			log.Printf("Garbage collector error: %v", err)
-		}
-	}()
+	// Create task analyzer
+	analyzer := workers.NewTaskAnalyzer(
+		aiProvider,
+		todoRepo,
+		contextRepo,
+		activityRepo,
+		tagStatsRepo,
+		jobQueue,
+		zapLogger,
+	)
 
-	// Start reprocessing scheduler (every 12 hours)
-	reprocTicker := time.NewTicker(12 * time.Hour)
-	defer reprocTicker.Stop()
-	go func() {
-		for range reprocTicker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			if err := reprocessor.ScheduleReprocessingJobs(ctx); err != nil {
-				log.Printf("Failed to schedule reprocessing jobs: %v", err)
-			}
-			cancel()
-		}
-	}()
+	// Create tag analyzer
+	tagAnalyzer := workers.NewTagAnalyzer(
+		todoRepo,
+		tagStatsRepo,
+		zapLogger,
+	)
 
-	// Start activity tracker (checks every hour)
-	activityTracker := middleware.NewActivityTracker(activityRepo)
-	activityCtx, activityCancel := context.WithCancel(context.Background())
-	defer activityCancel()
-	go activityTracker.Start(activityCtx)
+	// Create reprocessor for scheduled reprocessing
+	reprocessor := workers.NewReprocessor(
+		jobQueue,
+		activityRepo,
+		zapLogger,
+	)
 
-	// Main worker loop
+	// Create garbage collector for job cleanup
+	// Run every hour, retain jobs for 24 hours
+	gc := queue.NewGarbageCollector(jobQueue, 1*time.Hour, 24*time.Hour)
+
+	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle shutdown signals
+	// Setup signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Println("Worker started, processing jobs...")
-
-	// Configure prefetch count for fair distribution across workers
-	// prefetchCount=1 ensures fair dispatch (one message per worker at a time)
-	// Higher values improve throughput but can lead to uneven distribution
-	// For AI processing jobs, 1-3 is typically optimal
-	// Default is 1 if RABBITMQ_PREFETCH is not set
-	prefetchCount := cfg.RabbitMQPrefetch
-	if prefetchCount < 1 {
-		prefetchCount = 1
-		log.Printf("Warning: RABBITMQ_PREFETCH must be >= 1, using default of 1")
-	}
-	log.Printf("Using RabbitMQ prefetch count: %d", prefetchCount)
-
-	// Start consuming messages asynchronously
-	msgChan, errChan, err := jobQueue.Consume(ctx, prefetchCount)
+	// Start consuming messages
+	msgChan, errChan, err := jobQueue.Consume(ctx, cfg.RabbitMQPrefetch)
 	if err != nil {
-		log.Fatalf("Failed to start consuming jobs: %v", err)
+		zapLogger.Fatal("Failed to start consuming messages", zap.Error(err))
 	}
 
-	// Worker loop - processes messages as they arrive
+	zapLogger.Info("Worker started, consuming messages from queue")
+
+	// Start garbage collector
+	go func() {
+		if err := gc.Start(ctx); err != nil && err != context.Canceled {
+			zapLogger.Error("Garbage collector stopped with error", zap.Error(err))
+		}
+	}()
+	zapLogger.Info("Started garbage collector",
+		zap.Duration("interval", 1*time.Hour),
+		zap.Duration("retention", 24*time.Hour),
+	)
+
+	// Start reprocessor scheduler (runs every 12 hours)
+	go func() {
+		ticker := time.NewTicker(12 * time.Hour)
+		defer ticker.Stop()
+
+		// Run once at startup
+		if err := reprocessor.ScheduleReprocessingJobs(ctx); err != nil {
+			zapLogger.Error("Failed to schedule initial reprocessing jobs", zap.Error(err))
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := reprocessor.ScheduleReprocessingJobs(ctx); err != nil {
+					zapLogger.Error("Failed to schedule reprocessing jobs", zap.Error(err))
+				}
+			}
+		}
+	}()
+	zapLogger.Info("Started reprocessing scheduler",
+		zap.Duration("interval", 12*time.Hour),
+	)
+
+	// Process messages
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case err := <-errChan:
-				if err != nil {
-					log.Printf("Error from message consumer: %v", err)
-					// Wait a bit before retrying (the consumer will attempt to reconnect)
-					time.Sleep(5 * time.Second)
-				}
 			case msg, ok := <-msgChan:
 				if !ok {
-					// Channel closed
-					log.Println("Message channel closed, stopping worker")
+					zapLogger.Info("Message channel closed")
 					return
 				}
 
-				// Route job to appropriate worker based on job type
 				job := msg.GetJob()
+				
+				// Route job to appropriate analyzer based on type
 				var err error
 				switch job.Type {
 				case queue.JobTypeTagAnalysis:
@@ -190,51 +206,52 @@ func main() {
 				case queue.JobTypeTaskAnalysis, queue.JobTypeReprocessUser:
 					err = analyzer.ProcessJob(ctx, msg)
 				default:
-					log.Printf("Unknown job type: %s", job.Type)
+					zapLogger.Error("Unknown job type",
+						zap.String("job_id", job.ID.String()),
+						zap.String("job_type", string(job.Type)),
+					)
+					// Nack unknown job types
 					if nackErr := msg.Nack(false); nackErr != nil {
-						log.Printf("Failed to nack unknown job type: %v", nackErr)
+						zapLogger.Error("Failed to nack unknown job type",
+							zap.String("job_id", job.ID.String()),
+							zap.Error(nackErr),
+						)
 					}
 					continue
 				}
 
 				if err != nil {
-					log.Printf("Failed to process job: %v", err)
-					// Error handling (including retries) is done in ProcessJob
-					// For rate limit errors, ProcessJob handles re-enqueueing with delays
+					zapLogger.Error("Failed to process job",
+						zap.Error(err),
+						zap.String("job_id", job.ID.String()),
+						zap.String("job_type", string(job.Type)),
+					)
 				}
+			}
+		}
+	}()
+
+	// Handle errors
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case err, ok := <-errChan:
+				if !ok {
+					return
+				}
+				zapLogger.Error("Queue error", zap.Error(err))
 			}
 		}
 	}()
 
 	// Wait for shutdown signal
 	<-sigChan
-	log.Println("Shutting down worker...")
+	zapLogger.Info("Shutdown signal received, stopping worker...")
 
-	// Cancel contexts
+	// Cancel context to stop processing
 	cancel()
-	gcCancel()
-	activityCancel()
 
-	log.Println("Worker stopped")
-}
-
-// createAIProvider creates an AI provider based on configuration
-func createAIProvider(cfg *config.Config) (ai.AIProvider, error) {
-	// Create provider registry
-	registry := ai.NewProviderRegistry()
-	ai.RegisterOpenAI(registry)
-
-	// Get provider config
-	providerType := cfg.AIProvider
-	if providerType == "" {
-		providerType = "openai"
-	}
-
-	config := map[string]string{
-		"api_key":  cfg.OpenAIKey,
-		"model":    cfg.AIModel,
-		"base_url": cfg.AIBaseURL,
-	}
-
-	return registry.GetProvider(providerType, config)
+	zapLogger.Info("Worker stopped")
 }

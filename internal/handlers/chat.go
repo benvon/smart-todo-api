@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 // ChatHandler handles AI chat requests
@@ -20,14 +21,16 @@ type ChatHandler struct {
 	chatService    *ai.ChatService
 	contextService *ai.ContextService
 	contextRepo    *database.AIContextRepository
+	logger         *zap.Logger
 }
 
 // NewChatHandler creates a new chat handler
-func NewChatHandler(chatService *ai.ChatService, contextService *ai.ContextService, contextRepo *database.AIContextRepository) *ChatHandler {
+func NewChatHandler(chatService *ai.ChatService, contextService *ai.ContextService, contextRepo *database.AIContextRepository, logger *zap.Logger) *ChatHandler {
 	return &ChatHandler{
 		chatService:    chatService,
 		contextService: contextService,
 		contextRepo:    contextRepo,
+		logger:         logger,
 	}
 }
 
@@ -64,7 +67,10 @@ func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
 		"message":    "Chat session started",
 		"session_id": session.UserID.String(),
 	})); err != nil {
-		log.Printf("Failed to write SSE message: %v", err)
+		h.logger.Warn("failed_to_write_sse_message",
+			zap.String("error", logpkg.SanitizeError(err)),
+			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
+		)
 		return
 	}
 
@@ -110,9 +116,14 @@ func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
 		go func(ctx context.Context) {
 			updateCtx, updateCancel := context.WithTimeout(ctx, 5*time.Second)
 			defer updateCancel()
+			// Add user_id to context for logging
+			updateCtx = context.WithValue(updateCtx, ai.UserIDContextKey(), userID)
 
 			if err := h.contextService.UpdateContextSummary(updateCtx, userID, messages); err != nil {
-				log.Printf("Failed to save chat summary: %v", err)
+				h.logger.Error("failed_to_save_chat_summary",
+					zap.String("error", logpkg.SanitizeError(err)),
+					zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+				)
 			}
 		}(cleanupCtx)
 	}
@@ -143,7 +154,10 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Load user context
 	ctx := r.Context()
-	userContext, err := h.contextRepo.GetByUserID(ctx, user.ID)
+	// Add user_id to context for logging
+	ctxWithUserID := context.WithValue(ctx, ai.UserIDContextKey(), user.ID)
+
+	userContext, err := h.contextRepo.GetByUserID(ctxWithUserID, user.ID)
 	if err != nil {
 		// Create context if it doesn't exist
 		userContext = &models.AIContext{
@@ -153,7 +167,7 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get AI response
-	response, err := h.chatService.GetResponse(ctx, session, userContext)
+	response, err := h.chatService.GetResponse(ctxWithUserID, session, userContext)
 	if err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to get AI response")
 		return
@@ -164,9 +178,14 @@ func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		go func(ctx context.Context) {
 			summaryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
+			// Add user_id to context for logging
+			summaryCtx = context.WithValue(summaryCtx, ai.UserIDContextKey(), user.ID)
 
 			if err := h.contextService.UpdateContextSummary(summaryCtx, user.ID, session.Messages); err != nil {
-				log.Printf("Failed to summarize conversation: %v", err)
+				h.logger.Error("failed_to_summarize_conversation",
+					zap.String("error", logpkg.SanitizeError(err)),
+					zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
+				)
 			}
 		}(ctx)
 	}

@@ -3,28 +3,32 @@ package workers
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
+	"go.uber.org/zap"
 )
 
 // TagAnalyzer processes tag analysis jobs to aggregate tag statistics
 type TagAnalyzer struct {
-	todoRepo        database.TodoRepositoryInterface
-	tagStatsRepo    database.TagStatisticsRepositoryInterface
+	todoRepo     database.TodoRepositoryInterface
+	tagStatsRepo database.TagStatisticsRepositoryInterface
+	logger       *zap.Logger
 }
 
 // NewTagAnalyzer creates a new tag analyzer
 func NewTagAnalyzer(
 	todoRepo database.TodoRepositoryInterface,
 	tagStatsRepo database.TagStatisticsRepositoryInterface,
+	logger *zap.Logger,
 ) *TagAnalyzer {
 	return &TagAnalyzer{
 		todoRepo:     todoRepo,
 		tagStatsRepo: tagStatsRepo,
+		logger:       logger,
 	}
 }
 
@@ -34,7 +38,10 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 		return fmt.Errorf("user_id is required for tag analysis job")
 	}
 
-	log.Printf("Processing tag analysis job %s for user %s", job.ID, job.UserID)
+	a.logger.Info("processing_tag_analysis_job",
+		zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+	)
 
 	// Get or create tag statistics record
 	stats, err := a.tagStatsRepo.GetByUserIDOrCreate(ctx, job.UserID)
@@ -42,7 +49,11 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 		return fmt.Errorf("failed to get or create tag statistics: %w", err)
 	}
 
-	log.Printf("Tag statistics for user %s: tainted=%v, existing tags=%d", job.UserID, stats.Tainted, len(stats.TagStats))
+	a.logger.Debug("tag_statistics_status",
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+		zap.Bool("tainted", stats.Tainted),
+		zap.Int("existing_tags", len(stats.TagStats)),
+	)
 
 	// Always process tag analysis jobs when they're queued
 	// We re-analyze all todos to ensure tag statistics are up-to-date
@@ -54,26 +65,30 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	var allTodos []*models.Todo
 	page := 1
 	pageSize := 500
-	
+
 	for {
 		todos, _, err := a.todoRepo.GetByUserIDPaginated(ctx, job.UserID, nil, nil, page, pageSize)
 		if err != nil {
 			return fmt.Errorf("failed to get todos: %w", err)
 		}
-		
+
 		allTodos = append(allTodos, todos...)
-		
+
 		// Check if we've loaded all todos
 		// If this page returned no todos or fewer than pageSize, we're done
 		if len(todos) == 0 || len(todos) < pageSize {
 			break
 		}
-		
+
 		// Move to next page
 		page++
 	}
 
-	log.Printf("Loaded %d todos for user %s (across %d pages)", len(allTodos), job.UserID, page)
+	a.logger.Debug("loaded_todos_for_tag_analysis",
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+		zap.Int("total_todos", len(allTodos)),
+		zap.Int("pages", page),
+	)
 
 	// Aggregate tags from all todos (including completed ones)
 	tagStatsMap := make(map[string]models.TagStats)
@@ -88,7 +103,7 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 			if todo.Status == models.TodoStatusCompleted {
 				completedTodosWithTags++
 			}
-			
+
 			for _, tag := range todo.Metadata.CategoryTags {
 				// Initialize tag stats if not exists
 				if _, exists := tagStatsMap[tag]; !exists {
@@ -120,7 +135,12 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 		}
 	}
 
-	log.Printf("Found %d todos with tags (%d completed), aggregated %d unique tags for user %s", todosWithTags, completedTodosWithTags, len(tagStatsMap), job.UserID)
+	a.logger.Info("aggregated_tag_statistics",
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+		zap.Int("todos_with_tags", todosWithTags),
+		zap.Int("completed_todos_with_tags", completedTodosWithTags),
+		zap.Int("unique_tags", len(tagStatsMap)),
+	)
 
 	// Update statistics with aggregated data
 	stats.TagStats = tagStatsMap
@@ -136,13 +156,26 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	if !updated {
 		// Version conflict - another worker updated the statistics
 		// This is expected in concurrent scenarios, log and return success
-		log.Printf("Tag statistics for user %s was updated by another worker (version conflict), skipping save", job.UserID)
+		a.logger.Debug("tag_statistics_version_conflict",
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+		)
 		return nil
 	}
 
-	log.Printf("Successfully analyzed tags for user %s: %d unique tags", job.UserID, len(tagStatsMap))
-	if len(tagStatsMap) > 0 {
-		log.Printf("Tag breakdown for user %s: %+v", job.UserID, tagStatsMap)
+	a.logger.Info("successfully_analyzed_tags",
+		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+		zap.Int("unique_tags", len(tagStatsMap)),
+	)
+	if len(tagStatsMap) > 0 && a.logger.Core().Enabled(zap.DebugLevel) {
+		// Only log tag breakdown in debug mode (can be verbose)
+		tagList := make([]string, 0, len(tagStatsMap))
+		for tag := range tagStatsMap {
+			tagList = append(tagList, tag)
+		}
+		a.logger.Debug("tag_breakdown",
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+			zap.Strings("tags", tagList),
+		)
 	}
 	return nil
 }
@@ -153,10 +186,19 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 
 	// Check if job should be processed now (respect NotBefore)
 	if !job.ShouldProcess() {
-		log.Printf("Tag analysis job %s not ready yet (NotBefore: %v), skipping", job.ID, job.NotBefore)
+		fields := []zap.Field{
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+		}
+		if job.NotBefore != nil {
+			fields = append(fields, zap.Time("not_before", *job.NotBefore))
+		}
+		a.logger.Debug("tag_analysis_job_not_ready", fields...)
 		// Re-ack to return to queue and wait
 		if ackErr := msg.Ack(); ackErr != nil {
-			log.Printf("Failed to ack job for later processing: %v", ackErr)
+			a.logger.Warn("failed_to_ack_job_for_later_processing",
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(ackErr)),
+			)
 		}
 		return nil
 	}
@@ -166,9 +208,17 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 		if err := a.ProcessTagAnalysisJob(ctx, job); err != nil {
 			// For tag analysis errors, log and nack without requeue
 			// Tag analysis can be retried later if needed
-			log.Printf("Tag analysis job %s failed: %v", job.ID, err)
+			a.logger.Error("tag_analysis_job_failed",
+				zap.String("operation", "process_job"),
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+				zap.String("error", logpkg.SanitizeError(err)),
+			)
 			if nackErr := msg.Nack(false); nackErr != nil {
-				log.Printf("Failed to nack tag analysis job: %v", nackErr)
+				a.logger.Warn("failed_to_nack_tag_analysis_job",
+					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+					zap.String("error", logpkg.SanitizeError(nackErr)),
+				)
 			}
 			return fmt.Errorf("tag analysis failed: %w", err)
 		}
@@ -179,7 +229,11 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 
 	default:
 		if nackErr := msg.Nack(false); nackErr != nil {
-			log.Printf("Failed to nack unknown job type: %v", nackErr)
+			a.logger.Error("failed_to_nack_unknown_job_type",
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("job_type", string(job.Type)),
+				zap.String("error", logpkg.SanitizeError(nackErr)),
+			)
 		}
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}

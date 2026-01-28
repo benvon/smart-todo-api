@@ -11,22 +11,23 @@ import (
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // mockTagStatisticsRepoForWorker is a mock for testing tag analyzer worker
 type mockTagStatisticsRepoForWorker struct {
-	t                    *testing.T
-	getByUserIDFunc      func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
+	t                       *testing.T
+	getByUserIDFunc         func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
 	getByUserIDOrCreateFunc func(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error)
-	updateStatisticsFunc func(ctx context.Context, stats *models.TagStatistics) (bool, error)
-	markTaintedFunc      func(ctx context.Context, userID uuid.UUID) (bool, error)
-	
+	updateStatisticsFunc    func(ctx context.Context, stats *models.TagStatistics) (bool, error)
+	markTaintedFunc         func(ctx context.Context, userID uuid.UUID) (bool, error)
+
 	// Call tracking (protected by mutex for concurrent access)
-	mu                    sync.Mutex
-	getByUserIDCalls      []uuid.UUID
+	mu                       sync.Mutex
+	getByUserIDCalls         []uuid.UUID
 	getByUserIDOrCreateCalls []uuid.UUID
-	updateStatisticsCalls []*models.TagStatistics
-	markTaintedCalls      []uuid.UUID
+	updateStatisticsCalls    []*models.TagStatistics
+	markTaintedCalls         []uuid.UUID
 }
 
 func (m *mockTagStatisticsRepoForWorker) GetByUserID(ctx context.Context, userID uuid.UUID) (*models.TagStatistics, error) {
@@ -167,7 +168,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_Success(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -248,7 +249,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_ProcessesEvenWhenNotTainted(t *testin
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -301,7 +302,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_VersionConflict(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -361,7 +362,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_HandlesEmptyTags(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -443,7 +444,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_IncludesCompletedTodos(t *testing.T) 
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -473,7 +474,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_DebouncedJobs(t *testing.T) {
 	mockTodoRepo := &mockTodoRepo{t: t}
 	mockTagStatsRepo := &mockTagStatisticsRepoForWorker{t: t}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	acked := false
 	msg := &mockMessage{
@@ -513,7 +514,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_InvalidJobType(t *testing.T) {
 	mockTodoRepo := &mockTodoRepo{t: t}
 	mockTagStatsRepo := &mockTagStatisticsRepoForWorker{t: t}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	nacked := false
 	msg := &mockMessage{
@@ -600,7 +601,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_ConcurrentWorkers(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -702,7 +703,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_ProcessesRegardlessOfTaintedStatus(t 
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),
@@ -779,7 +780,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_MultipleRapidJobs(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	// Create multiple jobs with debounce delays
 	jobs := []*queue.Job{
@@ -829,7 +830,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_MissingUserID(t *testing.T) {
 	mockTodoRepo := &mockTodoRepo{t: t}
 	mockTagStatsRepo := &mockTagStatisticsRepoForWorker{t: t}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	msg := &mockMessage{job: job}
 
@@ -868,7 +869,7 @@ func TestTagAnalyzer_ProcessTagAnalysisJob_DatabaseError(t *testing.T) {
 		},
 	}
 
-	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo)
+	analyzer := NewTagAnalyzer(mockTodoRepo, mockTagStatsRepo, zap.NewNop())
 
 	job := &queue.Job{
 		ID:     uuid.New(),

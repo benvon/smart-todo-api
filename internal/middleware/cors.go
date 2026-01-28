@@ -1,16 +1,12 @@
 package middleware
 
 import (
-	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
-)
 
-var (
-	// debugMode enables verbose CORS logging (set via DEBUG=true env var)
-	debugMode = os.Getenv("DEBUG") == "true"
+	logpkg "github.com/benvon/smart-todo/internal/logger"
+	"go.uber.org/zap"
 )
 
 // isValidOrigin validates that an origin string has a valid format (scheme://host[:port])
@@ -38,9 +34,11 @@ func isValidOrigin(origin string) bool {
 }
 
 // CORS creates CORS middleware that handles CORS headers and OPTIONS preflight requests
-func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
+func CORS(allowedOrigins []string, logger *zap.Logger, debugMode bool) func(http.Handler) http.Handler {
 	if debugMode {
-		log.Printf("CORS middleware initialized with allowed origins: %v", allowedOrigins)
+		logger.Info("cors_middleware_initialized",
+			zap.Strings("allowed_origins", allowedOrigins),
+		)
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -49,14 +47,20 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			// Validate origin format
 			if origin != "" && !isValidOrigin(origin) {
 				if debugMode {
-					log.Printf("[CORS] Invalid origin format: %s", origin)
+					logger.Debug("cors_invalid_origin_format",
+						zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
+					)
 				}
 				// Continue but don't set CORS headers for invalid origins
 				origin = ""
 			}
 
 			if debugMode {
-				log.Printf("[CORS] REQUEST: %s %s | Origin: '%s'", r.Method, r.URL.Path, origin)
+				logger.Debug("cors_request",
+					zap.String("method", r.Method),
+					zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+					zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
+				)
 			}
 
 			// Check if origin is allowed
@@ -73,7 +77,10 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			// Handle preflight OPTIONS requests
 			if r.Method == http.MethodOptions {
 				if debugMode {
-					log.Printf("[CORS] OPTIONS preflight for %s - allowed: %v", r.URL.Path, allowed)
+					logger.Debug("cors_options_preflight",
+						zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+						zap.Bool("allowed", allowed),
+					)
 				}
 				if allowed && origin != "" && origin != "null" {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -102,7 +109,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 
 // CORSFromEnv creates CORS middleware from environment variable
 // Parses FRONTEND_URL (comma-separated origins) and defaults to http://localhost:3000
-func CORSFromEnv(frontendURL string) func(http.Handler) http.Handler {
+func CORSFromEnv(frontendURL string, logger *zap.Logger, debugMode bool) func(http.Handler) http.Handler {
 	origins := []string{"http://localhost:3000"}
 	if frontendURL != "" {
 		// Parse comma-separated origins and trim whitespace
@@ -124,5 +131,5 @@ func CORSFromEnv(frontendURL string) func(http.Handler) http.Handler {
 			}
 		}
 	}
-	return CORS(origins)
+	return CORS(origins, logger, debugMode)
 }

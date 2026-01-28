@@ -25,9 +25,11 @@ func TestNewClient(t *testing.T) {
 			validate: func(t *testing.T, client *Client) {
 				if client == nil {
 					t.Fatal("Client is nil")
+					return
 				}
 				if client.config == nil {
 					t.Fatal("OAuth2 config is nil")
+					return
 				}
 				if client.config.ClientID != "test-client-id" {
 					t.Errorf("Expected ClientID 'test-client-id', got '%s'", client.config.ClientID)
@@ -51,6 +53,11 @@ func TestNewClient(t *testing.T) {
 			validate: func(t *testing.T, client *Client) {
 				if client == nil {
 					t.Fatal("Client is nil")
+					return
+				}
+				if client.config == nil {
+					t.Fatal("OAuth2 config is nil")
+					return
 				}
 				if client.config.ClientSecret != "" {
 					t.Errorf("Expected empty ClientSecret for public client, got '%s'", client.config.ClientSecret)
