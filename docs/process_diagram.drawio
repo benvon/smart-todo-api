@@ -4,6 +4,9 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
+        <mxCell id="BPxlh0Uf_l82MEbVVd5i-15" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="" vertex="1">
+          <mxGeometry height="410" width="320" x="340" y="80" as="geometry" />
+        </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-2" edge="1" parent="1" source="uTBouIJpRbtZi_rTHcqV-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="BPxlh0Uf_l82MEbVVd5i-1" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
@@ -14,34 +17,43 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Cursor: Implement" vertex="1">
-          <mxGeometry height="60" width="120" x="240" y="120" as="geometry" />
+          <mxGeometry height="60" width="120" x="200" y="120" as="geometry" />
         </mxCell>
-        <mxCell id="BPxlh0Uf_l82MEbVVd5i-6" edge="1" parent="1" source="BPxlh0Uf_l82MEbVVd5i-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="BPxlh0Uf_l82MEbVVd5i-5" value="">
+        <mxCell id="BPxlh0Uf_l82MEbVVd5i-6" edge="1" parent="1" source="BPxlh0Uf_l82MEbVVd5i-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" target="BPxlh0Uf_l82MEbVVd5i-5" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-10" edge="1" parent="1" source="BPxlh0Uf_l82MEbVVd5i-3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" target="BPxlh0Uf_l82MEbVVd5i-9" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Local Testing" vertex="1">
-          <mxGeometry height="60" width="120" x="440" y="120" as="geometry" />
+          <mxGeometry height="60" width="120" x="360" y="120" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-8" edge="1" parent="1" source="BPxlh0Uf_l82MEbVVd5i-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="BPxlh0Uf_l82MEbVVd5i-7" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="BPxlh0Uf_l82MEbVVd5i-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="GitHub: PR - co-pilot review" vertex="1">
-          <mxGeometry height="60" width="120" x="640" y="120" as="geometry" />
+        <mxCell id="BPxlh0Uf_l82MEbVVd5i-14" edge="1" parent="1" source="BPxlh0Uf_l82MEbVVd5i-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="BPxlh0Uf_l82MEbVVd5i-13" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="BPxlh0Uf_l82MEbVVd5i-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="GitHub: PR workflows + co-pilot review" vertex="1">
+          <mxGeometry height="60" width="120" x="520" y="120" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-12" edge="1" parent="1" source="BPxlh0Uf_l82MEbVVd5i-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=classic;startFill=1;" target="BPxlh0Uf_l82MEbVVd5i-11" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-7" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="GitHub: Co-Pilot fix" vertex="1">
-          <mxGeometry height="60" width="120" x="640" y="260" as="geometry" />
+          <mxGeometry height="60" width="120" x="520" y="260" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-9" parent="1" style="whiteSpace=wrap;html=1;rounded=1;" value="unit tests, linters, gosec, govulncheck, etc etc etc" vertex="1">
-          <mxGeometry height="60" width="120" x="440" y="260" as="geometry" />
+          <mxGeometry height="60" width="120" x="360" y="260" as="geometry" />
         </mxCell>
         <mxCell id="BPxlh0Uf_l82MEbVVd5i-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Cursor: PR review" vertex="1">
-          <mxGeometry height="60" width="120" x="640" y="400" as="geometry" />
+          <mxGeometry height="60" width="120" x="520" y="400" as="geometry" />
+        </mxCell>
+        <mxCell id="BPxlh0Uf_l82MEbVVd5i-13" parent="1" style="whiteSpace=wrap;html=1;rounded=1;" value="PR Merge: create release" vertex="1">
+          <mxGeometry height="60" width="120" x="680" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="BPxlh0Uf_l82MEbVVd5i-16" parent="1" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" value="Repeat as required" vertex="1">
+          <mxGeometry height="30" width="60" x="390" y="400" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
