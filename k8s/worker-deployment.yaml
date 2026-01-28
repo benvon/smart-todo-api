@@ -153,6 +153,12 @@ spec:
               name: app-config
               key: AI_BASE_URL
               optional: true
+        - name: WORKER_DEBUG_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: WORKER_DEBUG_MODE
+              optional: true
         # Optional: Uncomment if OPENAI_API_KEY is in secret
         # - name: OPENAI_API_KEY
         #   valueFrom:

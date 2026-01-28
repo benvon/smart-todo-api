@@ -12,3 +12,5 @@ data:
   AI_PROVIDER: "openai"
   AI_MODEL: "gpt-5-mini"
   AI_BASE_URL: ""
+  WORKER_DEBUG_MODE: "false"  # Enable structured logging of LLM API prompts and responses (worker)
+  SERVER_DEBUG_MODE: "false"  # Enable structured logging of LLM API prompts and responses (server)

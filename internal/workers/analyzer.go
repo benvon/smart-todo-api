@@ -3,7 +3,6 @@ package workers
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // TagStatsCache represents a cached tag statistics entry
@@ -32,6 +32,7 @@ type TaskAnalyzer struct {
 	tagStatsCache map[uuid.UUID]*TagStatsCache              // Cache for tag statistics by user ID
 	cacheMu       sync.RWMutex                              // Mutex for cache map
 	cacheTTL      time.Duration                             // Cache TTL (default 3 minutes)
+	logger        *zap.Logger
 }
 
 // NewTaskAnalyzer creates a new task analyzer
@@ -42,6 +43,7 @@ func NewTaskAnalyzer(
 	activityRepo database.UserActivityRepositoryInterface,
 	tagStatsRepo database.TagStatisticsRepositoryInterface,
 	jobQueue queue.JobQueue,
+	logger *zap.Logger,
 ) *TaskAnalyzer {
 	return &TaskAnalyzer{
 		aiProvider:    aiProvider,
@@ -52,6 +54,7 @@ func NewTaskAnalyzer(
 		jobQueue:      jobQueue,
 		tagStatsCache: make(map[uuid.UUID]*TagStatsCache),
 		cacheTTL:      3 * time.Minute, // Default 3 minutes TTL
+		logger:        logger,
 	}
 }
 
@@ -120,9 +123,9 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 
 	// Load user context
 	var userContext *models.AIContext
-	context, err := a.contextRepo.GetByUserID(ctx, job.UserID)
+	aiContext, err := a.contextRepo.GetByUserID(ctx, job.UserID)
 	if err == nil {
-		userContext = context
+		userContext = aiContext
 	}
 
 	// Load tag statistics to guide AI tag selection
@@ -135,7 +138,9 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	// Check if user has reprocessing paused
 	activity, err := a.activityRepo.GetByUserID(ctx, job.UserID)
 	if err == nil && activity != nil && activity.ReprocessingPaused {
-		log.Printf("Skipping analysis for user %s (reprocessing paused)", job.UserID)
+		a.logger.Debug("skipping_analysis_reprocessing_paused",
+			zap.String("user_id", job.UserID.String()),
+		)
 		return nil
 	}
 
@@ -144,10 +149,15 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	if todo.Status == models.TodoStatusPending {
 		todo.Status = models.TodoStatusProcessing
 		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
-			log.Printf("Failed to update todo status to processing: %v", err)
+			a.logger.Warn("failed_to_update_todo_status_to_processing",
+				zap.String("todo_id", todo.ID.String()),
+				zap.Error(err),
+			)
 			// Continue with analysis even if status update fails
 		} else {
-			log.Printf("Set todo %s status to processing", todo.ID)
+			a.logger.Debug("set_todo_status_to_processing",
+				zap.String("todo_id", todo.ID.String()),
+			)
 		}
 	}
 
@@ -160,22 +170,26 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		// If parsing fails, fall back to CreatedAt
 	}
 
+	// Add user_id and todo_id to context for logging
+	ctxWithIDs := context.WithValue(ctx, ai.UserIDContextKey(), job.UserID)
+	ctxWithIDs = context.WithValue(ctxWithIDs, ai.TodoIDContextKey(), todo.ID)
+
 	// Analyze task (with due date if available)
 	var tags []string
 	var timeHorizon models.TimeHorizon
 	// Check if provider supports due date analysis
 	if todo.DueDate != nil {
 		if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext, tagStats)
+			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctxWithIDs, todo.Text, todo.DueDate, createdAt, userContext, tagStats)
 		} else {
-			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctxWithIDs, todo.Text, userContext)
 		}
 	} else {
 		// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time and tag stats
 		if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext, tagStats)
+			tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctxWithIDs, todo.Text, nil, createdAt, userContext, tagStats)
 		} else {
-			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+			tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctxWithIDs, todo.Text, userContext)
 		}
 	}
 	if err != nil {
@@ -183,7 +197,10 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		if todo.Status == models.TodoStatusProcessing {
 			todo.Status = models.TodoStatusPending
 			if updateErr := a.todoRepo.Update(ctx, todo, originalTags); updateErr != nil {
-				log.Printf("Failed to reset todo status to pending after error: %v", updateErr)
+				a.logger.Warn("failed_to_reset_todo_status_to_pending",
+					zap.String("todo_id", todo.ID.String()),
+					zap.Error(updateErr),
+				)
 			}
 		}
 		return fmt.Errorf("failed to analyze task: %w", err)
@@ -212,7 +229,13 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
 
-	log.Printf("Analyzed todo %s: tags=%v, time_horizon=%s, status=%s", todo.ID, tags, timeHorizon, todo.Status)
+	a.logger.Info("analyzed_todo",
+		zap.String("todo_id", todo.ID.String()),
+		zap.Strings("tags", tags),
+		zap.String("time_horizon", string(timeHorizon)),
+		zap.String("status", string(todo.Status)),
+		zap.String("user_id", job.UserID.String()),
+	)
 	return nil
 }
 
@@ -221,7 +244,9 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 	// Check if user has reprocessing paused
 	activity, err := a.activityRepo.GetByUserID(ctx, job.UserID)
 	if err == nil && activity != nil && activity.ReprocessingPaused {
-		log.Printf("Skipping reprocessing for user %s (reprocessing paused)", job.UserID)
+		a.logger.Debug("skipping_reprocessing_paused",
+			zap.String("user_id", job.UserID.String()),
+		)
 		return nil
 	}
 
@@ -241,9 +266,9 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 
 	// Load user context
 	var userContext *models.AIContext
-	context, err := a.contextRepo.GetByUserID(ctx, job.UserID)
+	aiContext, err := a.contextRepo.GetByUserID(ctx, job.UserID)
 	if err == nil {
-		userContext = context
+		userContext = aiContext
 	}
 
 	// Re-analyze each todo
@@ -272,25 +297,33 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 			tagStats = stats
 		}
 
+		// Add user_id and todo_id to context for logging
+		ctxWithIDs := context.WithValue(ctx, ai.UserIDContextKey(), job.UserID)
+		ctxWithIDs = context.WithValue(ctxWithIDs, ai.TodoIDContextKey(), todo.ID)
+
 		// Analyze task (with due date if available)
 		var tags []string
 		var timeHorizon models.TimeHorizon
 		if todo.DueDate != nil {
 			if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, todo.DueDate, createdAt, userContext, tagStats)
+				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctxWithIDs, todo.Text, todo.DueDate, createdAt, userContext, tagStats)
 			} else {
-				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctxWithIDs, todo.Text, userContext)
 			}
 		} else {
 			// Even without due date, use AnalyzeTaskWithDueDate if available to pass creation time and tag stats
 			if providerWithDueDate, ok := a.aiProvider.(ai.AIProviderWithDueDate); ok {
-				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctx, todo.Text, nil, createdAt, userContext, tagStats)
+				tags, timeHorizon, err = providerWithDueDate.AnalyzeTaskWithDueDate(ctxWithIDs, todo.Text, nil, createdAt, userContext, tagStats)
 			} else {
-				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctx, todo.Text, userContext)
+				tags, timeHorizon, err = a.aiProvider.AnalyzeTask(ctxWithIDs, todo.Text, userContext)
 			}
 		}
 		if err != nil {
-			log.Printf("Failed to analyze todo %s: %v", todo.ID, err)
+			a.logger.Error("failed_to_analyze_todo",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", job.UserID.String()),
+				zap.Error(err),
+			)
 			continue
 		}
 
@@ -309,12 +342,20 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 
 		// Update todo (tag change detection is handled automatically by the repository)
 		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
-			log.Printf("Failed to update todo %s: %v", todo.ID, err)
+			a.logger.Error("failed_to_update_todo",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", job.UserID.String()),
+				zap.Error(err),
+			)
 			continue
 		}
 	}
 
-	log.Printf("Reprocessed %d todos for user %s, updated %d time horizons", len(todosToProcess), job.UserID, updated)
+	a.logger.Info("reprocessed_todos",
+		zap.Int("todos_processed", len(todosToProcess)),
+		zap.Int("time_horizons_updated", updated),
+		zap.String("user_id", job.UserID.String()),
+	)
 	return nil
 }
 
@@ -324,10 +365,17 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 
 	// Check if job should be processed now (respect NotBefore)
 	if !job.ShouldProcess() {
-		log.Printf("Job %s not ready yet (NotBefore: %v), skipping", job.ID, job.NotBefore)
+		a.logger.Debug("job_not_ready_yet",
+			zap.String("job_id", job.ID.String()),
+			zap.String("job_type", string(job.Type)),
+			zap.Any("not_before", job.NotBefore),
+		)
 		// Re-ack to return to queue and wait
 		if ackErr := msg.Ack(); ackErr != nil {
-			log.Printf("Failed to ack job for later processing: %v", ackErr)
+			a.logger.Warn("failed_to_ack_job_for_later_processing",
+				zap.String("job_id", job.ID.String()),
+				zap.Error(ackErr),
+			)
 		}
 		return nil
 	}
@@ -346,7 +394,10 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 		if err := a.ProcessReprocessUserJob(ctx, job); err != nil {
 			// Reprocessing failures are less critical, just log
 			if nackErr := msg.Nack(false); nackErr != nil { // Don't requeue reprocessing jobs
-				log.Printf("Failed to nack reprocessing job: %v", nackErr)
+				a.logger.Warn("failed_to_nack_reprocessing_job",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(nackErr),
+				)
 			}
 			return fmt.Errorf("reprocessing failed: %w", err)
 		}
@@ -357,7 +408,11 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 
 	default:
 		if nackErr := msg.Nack(false); nackErr != nil { // Unknown job type, send to DLQ
-			log.Printf("Failed to nack unknown job type: %v", nackErr)
+			a.logger.Error("failed_to_nack_unknown_job_type",
+				zap.String("job_id", job.ID.String()),
+				zap.String("job_type", string(job.Type)),
+				zap.Error(nackErr),
+			)
 		}
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}
@@ -367,14 +422,22 @@ func (a *TaskAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterfac
 func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInterface, job *queue.Job, err error, jobType string) error {
 	// Check if it's a quota error (should not retry immediately)
 	if ai.IsQuotaError(err) {
-		log.Printf("Quota exceeded for %s job %s: %v", jobType, job.ID, err)
+		a.logger.Warn("quota_exceeded",
+			zap.String("job_type", jobType),
+			zap.String("job_id", job.ID.String()),
+			zap.Error(err),
+		)
 
 		// For quota errors, re-enqueue with long delay (1 hour minimum)
 		retryDelay := ai.GetRetryDelay(err, job.RetryCount)
 		notBefore := time.Now().Add(retryDelay)
 
-		log.Printf("Re-enqueueing %s job %s with NotBefore=%v (quota exhausted, retry in %v)",
-			jobType, job.ID, notBefore, retryDelay)
+		a.logger.Info("re_enqueueing_job_quota_exhausted",
+			zap.String("job_type", jobType),
+			zap.String("job_id", job.ID.String()),
+			zap.Time("not_before", notBefore),
+			zap.Duration("retry_delay", retryDelay),
+		)
 
 		// Create new job with delayed retry
 		delayedJob := &queue.Job{
@@ -392,24 +455,39 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 		// Ack the current message
 		if ackErr := msg.Ack(); ackErr != nil {
-			log.Printf("Failed to ack job before re-enqueue: %v", ackErr)
+			a.logger.Warn("failed_to_ack_job_before_re_enqueue",
+				zap.String("job_id", job.ID.String()),
+				zap.Error(ackErr),
+			)
 		}
 
 		// Re-enqueue with delay using NotBefore (RabbitMQ delayed exchange will handle this)
 		if a.jobQueue != nil {
 			if enqueueErr := a.jobQueue.Enqueue(ctx, delayedJob); enqueueErr != nil {
-				log.Printf("Failed to re-enqueue job %s with delay: %v", job.ID, enqueueErr)
+				a.logger.Error("failed_to_re_enqueue_job_with_delay",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(enqueueErr),
+				)
 				// If re-enqueue fails, send to DLQ
 				return fmt.Errorf("quota exhausted, failed to re-enqueue: %w", enqueueErr)
 			}
-			log.Printf("Successfully re-enqueued %s job %s for retry at %v", jobType, job.ID, notBefore)
+			a.logger.Info("successfully_re_enqueued_job",
+				zap.String("job_type", jobType),
+				zap.String("job_id", job.ID.String()),
+				zap.Time("retry_at", notBefore),
+			)
 			return nil // Successfully handled
 		}
 
 		// If no queue access, nack without requeue to prevent spam
-		log.Printf("Warning: No queue access, cannot re-enqueue job with delay. Sending to DLQ.")
+		a.logger.Warn("no_queue_access_cannot_re_enqueue",
+			zap.String("job_id", job.ID.String()),
+		)
 		if nackErr := msg.Nack(false); nackErr != nil {
-			log.Printf("Failed to nack quota error job: %v", nackErr)
+			a.logger.Warn("failed_to_nack_quota_error_job",
+				zap.String("job_id", job.ID.String()),
+				zap.Error(nackErr),
+			)
 		}
 
 		return fmt.Errorf("quota exhausted (job %s): %w", job.ID, err)
@@ -417,7 +495,11 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 	// Check if it's a rate limit error (should retry with backoff)
 	if ai.IsRateLimitError(err) {
-		log.Printf("Rate limited for %s job %s: %v", jobType, job.ID, err)
+		a.logger.Warn("rate_limited",
+			zap.String("job_type", jobType),
+			zap.String("job_id", job.ID.String()),
+			zap.Error(err),
+		)
 
 		retryDelay := ai.GetRetryDelay(err, job.RetryCount)
 
@@ -439,31 +521,50 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 
 			// Ack the current message
 			if ackErr := msg.Ack(); ackErr != nil {
-				log.Printf("Failed to ack rate limited job: %v", ackErr)
+				a.logger.Warn("failed_to_ack_rate_limited_job",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(ackErr),
+				)
 			}
 
 			// Re-enqueue with delay
 			if enqueueErr := a.jobQueue.Enqueue(ctx, delayedJob); enqueueErr != nil {
-				log.Printf("Failed to re-enqueue rate limited job %s: %v", job.ID, enqueueErr)
+				a.logger.Error("failed_to_re_enqueue_rate_limited_job",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(enqueueErr),
+				)
 				// Fall back to nack with requeue
 				if nackErr := msg.Nack(true); nackErr != nil {
-					log.Printf("Failed to nack rate limited job: %v", nackErr)
+					a.logger.Warn("failed_to_nack_rate_limited_job",
+						zap.String("job_id", job.ID.String()),
+						zap.Error(nackErr),
+					)
 				}
 				return fmt.Errorf("rate limited, failed to re-enqueue: %w", enqueueErr)
 			}
 
-			log.Printf("Rate limited: re-enqueued %s job %s for retry at %v (delay: %v)",
-				jobType, job.ID, notBefore, retryDelay)
+			a.logger.Info("rate_limited_re_enqueued",
+				zap.String("job_type", jobType),
+				zap.String("job_id", job.ID.String()),
+				zap.Time("retry_at", notBefore),
+				zap.Duration("retry_delay", retryDelay),
+			)
 			return nil // Successfully handled
 		}
 
 		// Fallback: nack with requeue (immediate retry)
 		if job.CanRetry() {
 			job.IncrementRetry()
-			log.Printf("Rate limit: will retry job %s immediately (attempt %d/%d)",
-				job.ID, job.RetryCount, job.MaxRetries)
+			a.logger.Info("rate_limit_will_retry_immediately",
+				zap.String("job_id", job.ID.String()),
+				zap.Int("attempt", job.RetryCount),
+				zap.Int("max_retries", job.MaxRetries),
+			)
 			if nackErr := msg.Nack(true); nackErr != nil {
-				log.Printf("Failed to nack rate limited job: %v", nackErr)
+				a.logger.Warn("failed_to_nack_rate_limited_job",
+					zap.String("job_id", job.ID.String()),
+					zap.Error(nackErr),
+				)
 			}
 			// Return error to signal worker to wait before processing next job
 			return fmt.Errorf("rate limited (will retry): %w", err)
@@ -473,17 +574,34 @@ func (a *TaskAnalyzer) handleJobError(ctx context.Context, msg queue.MessageInte
 	// For other errors, use standard retry logic
 	if job.CanRetry() {
 		job.IncrementRetry()
-		log.Printf("%s job %s failed (attempt %d/%d): %v, will retry", jobType, job.ID, job.RetryCount, job.MaxRetries, err)
+		a.logger.Warn("job_failed_will_retry",
+			zap.String("job_type", jobType),
+			zap.String("job_id", job.ID.String()),
+			zap.Int("attempt", job.RetryCount),
+			zap.Int("max_retries", job.MaxRetries),
+			zap.Error(err),
+		)
 		if nackErr := msg.Nack(true); nackErr != nil {
-			log.Printf("Failed to nack job: %v", nackErr)
+			a.logger.Warn("failed_to_nack_job",
+				zap.String("job_id", job.ID.String()),
+				zap.Error(nackErr),
+			)
 		}
 		return fmt.Errorf("job failed (will retry): %w", err)
 	}
 
 	// Max retries exceeded, send to DLQ
-	log.Printf("%s job %s failed after %d retries: %v, sending to DLQ", jobType, job.ID, job.MaxRetries, err)
+	a.logger.Error("job_failed_max_retries_exceeded",
+		zap.String("job_type", jobType),
+		zap.String("job_id", job.ID.String()),
+		zap.Int("max_retries", job.MaxRetries),
+		zap.Error(err),
+	)
 	if nackErr := msg.Nack(false); nackErr != nil {
-		log.Printf("Failed to nack job to DLQ: %v", nackErr)
+		a.logger.Warn("failed_to_nack_job_to_dlq",
+			zap.String("job_id", job.ID.String()),
+			zap.Error(nackErr),
+		)
 	}
 	return fmt.Errorf("job failed (max retries): %w", err)
 }

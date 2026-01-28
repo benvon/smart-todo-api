@@ -3,25 +3,27 @@ package workers
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // Reprocessor handles scheduling reprocessing jobs
 type Reprocessor struct {
 	jobQueue     queue.JobQueue
 	activityRepo database.UserActivityRepositoryInterface
+	logger       *zap.Logger
 }
 
 // NewReprocessor creates a new reprocessor
-func NewReprocessor(jobQueue queue.JobQueue, activityRepo database.UserActivityRepositoryInterface) *Reprocessor {
+func NewReprocessor(jobQueue queue.JobQueue, activityRepo database.UserActivityRepositoryInterface, logger *zap.Logger) *Reprocessor {
 	return &Reprocessor{
 		jobQueue:     jobQueue,
 		activityRepo: activityRepo,
+		logger:       logger,
 	}
 }
 
@@ -56,18 +58,28 @@ func (r *Reprocessor) ScheduleReprocessingJobs(ctx context.Context) error {
 	for _, userID := range eligibleUsers {
 		// Schedule morning job
 		if err := r.createReprocessingJob(ctx, userID, nextMorning); err != nil {
-			log.Printf("Failed to schedule morning reprocessing job for user %s: %v", userID, err)
+			r.logger.Warn("failed_to_schedule_morning_reprocessing_job",
+				zap.String("user_id", userID.String()),
+				zap.Error(err),
+			)
 			// Continue with other users
 		}
 
 		// Schedule evening job
 		if err := r.createReprocessingJob(ctx, userID, nextEvening); err != nil {
-			log.Printf("Failed to schedule evening reprocessing job for user %s: %v", userID, err)
+			r.logger.Warn("failed_to_schedule_evening_reprocessing_job",
+				zap.String("user_id", userID.String()),
+				zap.Error(err),
+			)
 			// Continue with other users
 		}
 	}
 
-	log.Printf("Scheduled reprocessing jobs for %d users at %s and %s", len(eligibleUsers), nextMorning, nextEvening)
+	r.logger.Info("scheduled_reprocessing_jobs",
+		zap.Int("user_count", len(eligibleUsers)),
+		zap.Time("next_morning", nextMorning),
+		zap.Time("next_evening", nextEvening),
+	)
 
 	return nil
 }

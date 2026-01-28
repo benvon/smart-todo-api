@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 // TodoHandler handles todo-related requests
@@ -23,27 +23,30 @@ type TodoHandler struct {
 	todoRepo     *database.TodoRepository
 	tagStatsRepo database.TagStatisticsRepositoryInterface
 	jobQueue     queue.JobQueue // Optional - if nil, job enqueueing is disabled
+	logger       *zap.Logger
 }
 
 // NewTodoHandler creates a new todo handler
-func NewTodoHandler(todoRepo *database.TodoRepository) *TodoHandler {
-	return &TodoHandler{todoRepo: todoRepo}
+func NewTodoHandler(todoRepo *database.TodoRepository, logger *zap.Logger) *TodoHandler {
+	return &TodoHandler{todoRepo: todoRepo, logger: logger}
 }
 
 // NewTodoHandlerWithQueue creates a new todo handler with job queue support
-func NewTodoHandlerWithQueue(todoRepo *database.TodoRepository, jobQueue queue.JobQueue) *TodoHandler {
+func NewTodoHandlerWithQueue(todoRepo *database.TodoRepository, jobQueue queue.JobQueue, logger *zap.Logger) *TodoHandler {
 	return &TodoHandler{
 		todoRepo: todoRepo,
 		jobQueue: jobQueue,
+		logger:   logger,
 	}
 }
 
 // NewTodoHandlerWithQueueAndTagStats creates a new todo handler with job queue and tag statistics support
-func NewTodoHandlerWithQueueAndTagStats(todoRepo *database.TodoRepository, tagStatsRepo database.TagStatisticsRepositoryInterface, jobQueue queue.JobQueue) *TodoHandler {
+func NewTodoHandlerWithQueueAndTagStats(todoRepo *database.TodoRepository, tagStatsRepo database.TagStatisticsRepositoryInterface, jobQueue queue.JobQueue, logger *zap.Logger) *TodoHandler {
 	return &TodoHandler{
 		todoRepo:     todoRepo,
 		tagStatsRepo: tagStatsRepo,
 		jobQueue:     jobQueue,
+		logger:       logger,
 	}
 }
 
@@ -254,12 +257,22 @@ func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
 		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
 			// Log error but don't fail the request
 			// The todo was created successfully, analysis can be retried later
-			log.Printf("Failed to enqueue AI analysis job for todo %s (user %s): %v", todo.ID, user.ID, err)
+			h.logger.Warn("failed_to_enqueue_ai_analysis_job",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", user.ID.String()),
+				zap.Error(err),
+			)
 		} else {
-			log.Printf("Enqueued AI analysis job for todo %s (user %s)", todo.ID, user.ID)
+			h.logger.Info("enqueued_ai_analysis_job",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", user.ID.String()),
+			)
 		}
 	} else {
-		log.Printf("Job queue not available - skipping AI analysis job for todo %s (user %s)", todo.ID, user.ID)
+		h.logger.Debug("job_queue_not_available",
+			zap.String("todo_id", todo.ID.String()),
+			zap.String("user_id", user.ID.String()),
+		)
 	}
 
 	respondJSON(w, http.StatusCreated, todo)
@@ -527,12 +540,19 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 	if h.jobQueue != nil {
 		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
 		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
-			log.Printf("Failed to enqueue AI analysis job for todo %s (user %s): %v", todo.ID, user.ID, err)
+			h.logger.Error("failed_to_enqueue_ai_analysis_job_manual",
+				zap.String("todo_id", todo.ID.String()),
+				zap.String("user_id", user.ID.String()),
+				zap.Error(err),
+			)
 			respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to enqueue analysis job")
 			return
 		}
 
-		log.Printf("Enqueued AI analysis job for todo %s (user %s) via manual trigger", todo.ID, user.ID)
+		h.logger.Info("enqueued_ai_analysis_job_manual",
+			zap.String("todo_id", todo.ID.String()),
+			zap.String("user_id", user.ID.String()),
+		)
 		respondJSON(w, http.StatusAccepted, map[string]string{
 			"message": "Analysis job enqueued",
 			"todo_id": todo.ID.String(),
@@ -541,7 +561,10 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Job queue not available
-	log.Printf("Job queue not available - AI analysis requested for todo %s (user %s)", todo.ID, user.ID)
+	h.logger.Warn("job_queue_not_available_manual_analysis",
+		zap.String("todo_id", todo.ID.String()),
+		zap.String("user_id", user.ID.String()),
+	)
 	respondJSONError(w, http.StatusServiceUnavailable, "Service Unavailable", "AI analysis is not available")
 }
 

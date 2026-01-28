@@ -21,6 +21,8 @@ type Config struct {
 	RedisURL         string
 	RabbitMQURL      string
 	RabbitMQPrefetch int
+	WorkerDebugMode  bool
+	ServerDebugMode  bool
 }
 
 // Load loads configuration from environment variables
@@ -39,6 +41,8 @@ func Load() (*Config, error) {
 		RedisURL:         getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		RabbitMQURL:      getEnv("RABBITMQ_URL", ""),
 		RabbitMQPrefetch: getEnvInt("RABBITMQ_PREFETCH", 1),
+		WorkerDebugMode:  getEnvBool("WORKER_DEBUG_MODE", false),
+		ServerDebugMode:  getEnvBool("SERVER_DEBUG_MODE", false),
 	}
 
 	if cfg.DatabaseURL == "" {

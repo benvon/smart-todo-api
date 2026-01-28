@@ -5,14 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/services/oidc"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 // getClientIP extracts the client IP from the request, respecting X-Forwarded-For
@@ -57,18 +57,18 @@ const (
 )
 
 // Auth creates authentication middleware that validates JWT tokens
-func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSManager, providerName string) func(http.Handler) http.Handler {
+func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSManager, providerName string, logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				respondError(w, http.StatusUnauthorized, "Missing Authorization header")
+				respondError(w, http.StatusUnauthorized, "Missing Authorization header", logger)
 				return
 			}
 
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				respondError(w, http.StatusUnauthorized, "Invalid Authorization header format")
+				respondError(w, http.StatusUnauthorized, "Invalid Authorization header format", logger)
 				return
 			}
 
@@ -76,8 +76,11 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 
 			// Validate token length to prevent DoS attacks
 			if len(tokenString) > MaxTokenSize {
-				log.Printf("Token exceeds maximum size: %d bytes (max: %d)", len(tokenString), MaxTokenSize)
-				respondError(w, http.StatusBadRequest, "Invalid token")
+				logger.Warn("token_exceeds_max_size",
+					zap.Int("token_size", len(tokenString)),
+					zap.Int("max_size", MaxTokenSize),
+				)
+				respondError(w, http.StatusBadRequest, "Invalid token", logger)
 				return
 			}
 
@@ -85,13 +88,16 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 			ctx := r.Context()
 			oidcConfig, err := oidcProvider.GetConfig(ctx, providerName)
 			if err != nil {
-				log.Printf("Failed to get OIDC config for provider '%s': %v", providerName, err)
-				respondError(w, http.StatusInternalServerError, "Failed to get OIDC configuration")
+				logger.Error("failed_to_get_oidc_config",
+					zap.String("provider", providerName),
+					zap.Error(err),
+				)
+				respondError(w, http.StatusInternalServerError, "Failed to get OIDC configuration", logger)
 				return
 			}
 
 			if oidcConfig.JWKSUrl == nil {
-				respondError(w, http.StatusInternalServerError, "JWKS URL not configured")
+				respondError(w, http.StatusInternalServerError, "JWKS URL not configured", logger)
 				return
 			}
 
@@ -101,8 +107,14 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 			if err != nil {
 				// Log detailed error server-side, but send generic message to client
 				ip := getClientIP(r)
-				log.Printf("[AUDIT] Token verification failed: ip=%s issuer=%s error=%v", ip, oidcConfig.Issuer, err)
-				respondError(w, http.StatusUnauthorized, "Invalid or expired token")
+				logger.Warn("token_verification_failed",
+					zap.String("ip", ip),
+					zap.String("issuer", oidcConfig.Issuer),
+					zap.Error(err),
+					zap.String("path", r.URL.Path),
+					zap.String("method", r.Method),
+				)
+				respondError(w, http.StatusUnauthorized, "Invalid or expired token", logger)
 				return
 			}
 
@@ -122,13 +134,20 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 						EmailVerified: true,
 					}
 					if err := userRepo.Create(ctx, user); err != nil {
-						respondError(w, http.StatusInternalServerError, "Failed to create user")
+						logger.Error("failed_to_create_user",
+							zap.Error(err),
+							zap.String("provider_id", claims.Sub),
+						)
+						respondError(w, http.StatusInternalServerError, "Failed to create user", logger)
 						return
 					}
 				} else {
 					// Actual database error (connection failure, timeout, etc.)
-					log.Printf("Database error while fetching user: %v", err)
-					respondError(w, http.StatusInternalServerError, "Database error")
+					logger.Error("database_error_fetching_user",
+						zap.Error(err),
+						zap.String("provider_id", claims.Sub),
+					)
+					respondError(w, http.StatusInternalServerError, "Database error", logger)
 					return
 				}
 			} else {
@@ -146,7 +165,10 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 				if updateNeeded {
 					if err := userRepo.Update(ctx, user); err != nil {
 						// Log error but continue - user can still use the app with stale data
-						log.Printf("Failed to update user info: %v", err)
+						logger.Warn("failed_to_update_user_info",
+							zap.Error(err),
+							zap.String("user_id", user.ID.String()),
+						)
 					}
 				}
 			}
@@ -158,7 +180,7 @@ func Auth(db *database.DB, oidcProvider *oidc.Provider, jwksManager *oidc.JWKSMa
 	}
 }
 
-func respondError(w http.ResponseWriter, status int, message string) {
+func respondError(w http.ResponseWriter, status int, message string, logger *zap.Logger) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 
@@ -168,6 +190,9 @@ func respondError(w http.ResponseWriter, status int, message string) {
 	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Failed to encode error response: %v", err)
+		logger.Error("failed_to_encode_error_response",
+			zap.Error(err),
+			zap.Int("status_code", status),
+		)
 	}
 }

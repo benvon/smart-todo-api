@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestLogging(t *testing.T) {
@@ -59,7 +61,7 @@ func TestLogging(t *testing.T) {
 				w.WriteHeader(tt.handlerStatus)
 			})
 
-			middleware := Logging(handler)
+			middleware := Logging(zap.NewNop())(handler)
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -86,7 +88,7 @@ func TestLoggingResponseWriter(t *testing.T) {
 		_, _ = w.Write([]byte("test")) // Ignore error in test
 	})
 
-	middleware := Logging(handler)
+	middleware := Logging(zap.NewNop())(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()

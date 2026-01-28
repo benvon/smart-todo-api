@@ -39,6 +39,8 @@ services:
       # OPENAI_API_KEY will be loaded from .env file via env_file
       # AI_BASE_URL is optional, defaults to https://api.openai.com/v1
       - AI_BASE_URL=${AI_BASE_URL:-}
+      # SERVER_DEBUG_MODE enables structured logging of LLM API prompts and responses (default: false)
+      - SERVER_DEBUG_MODE=${SERVER_DEBUG_MODE:-false}
     depends_on:
       db:
         condition: service_healthy
@@ -76,6 +78,8 @@ services:
       # OPENAI_API_KEY will be loaded from .env file via env_file
       # AI_BASE_URL is optional, defaults to https://api.openai.com/v1
       - AI_BASE_URL=${AI_BASE_URL:-}
+      # WORKER_DEBUG_MODE enables structured logging of LLM API prompts and responses (default: true)
+      - WORKER_DEBUG_MODE=${WORKER_DEBUG_MODE:-true}
     healthcheck:
       test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q worker || exit 1"]
       interval: 30s

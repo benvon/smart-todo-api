@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,44 +16,74 @@ import (
 	"github.com/benvon/smart-todo/internal/config"
 	"github.com/benvon/smart-todo/internal/database"
 	"github.com/benvon/smart-todo/internal/handlers"
+	"github.com/benvon/smart-todo/internal/logger"
 	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/benvon/smart-todo/internal/services/oidc"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"go.uber.org/zap"
 )
 
 func main() {
+	// Parse command-line flags
+	debugFlag := flag.Bool("debug", false, "Enable debug mode for LLM API logging")
+	flag.Parse()
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
-	log.Printf("Configuration loaded - FrontendURL: '%s', ServerPort: '%s'", cfg.FrontendURL, cfg.ServerPort)
+
+	// Override debug mode if flag is set
+	debugMode := cfg.ServerDebugMode || *debugFlag
+
+	// Initialize logger
+	zapLogger, err := logger.NewProductionLogger(debugMode)
+	if err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+	defer func() {
+		if syncErr := zapLogger.Sync(); syncErr != nil {
+			// Ignore sync errors in production
+			_ = syncErr
+		}
+	}()
+
+	zapLogger.Info("starting_server",
+		zap.Bool("debug_mode", debugMode),
+		zap.String("server_port", cfg.ServerPort),
+		zap.String("frontend_url", cfg.FrontendURL),
+		zap.String("ai_provider", cfg.AIProvider),
+		zap.String("ai_model", cfg.AIModel),
+	)
 
 	// Connect to database
 	db, err := database.New(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to database: %v", err)
+		zapLogger.Fatal("failed_to_connect_to_database", zap.Error(err))
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Printf("Failed to close database connection: %v", err)
+			zapLogger.Warn("failed_to_close_database_connection", zap.Error(err))
 		}
 	}()
+
+	zapLogger.Info("connected_to_database")
 
 	// Connect to Redis for rate limiting
 	redisLimiter, err := middleware.NewRedisRateLimiter(cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		zapLogger.Fatal("failed_to_connect_to_redis", zap.Error(err))
 	}
 	defer func() {
 		if err := redisLimiter.Close(); err != nil {
-			log.Printf("Failed to close Redis connection: %v", err)
+			zapLogger.Warn("failed_to_close_redis_connection", zap.Error(err))
 		}
 	}()
-	log.Println("Connected to Redis for rate limiting")
+	zapLogger.Info("connected_to_redis")
 
 	// Connect to RabbitMQ for job queue (required)
 	// Retry connection with exponential backoff to handle RabbitMQ startup delays
@@ -64,10 +95,10 @@ func main() {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		jobQueue, err = queue.NewRabbitMQQueue(cfg.RabbitMQURL)
 		if err == nil {
-			log.Println("Connected to RabbitMQ for job queue")
+			zapLogger.Info("connected_to_rabbitmq")
 			defer func() {
 				if err := jobQueue.Close(); err != nil {
-					log.Printf("Failed to close RabbitMQ connection: %v", err)
+					zapLogger.Warn("failed_to_close_rabbitmq_connection", zap.Error(err))
 				}
 			}()
 			break
@@ -78,17 +109,25 @@ func main() {
 		if delay > 30*time.Second {
 			delay = 30 * time.Second // Cap at 30 seconds
 		}
-		log.Printf("Failed to connect to RabbitMQ (attempt %d/%d): %v, retrying in %v...",
-			attempt+1, maxRetries, err, delay)
+		zapLogger.Warn("failed_to_connect_to_rabbitmq_retrying",
+			zap.Int("attempt", attempt+1),
+			zap.Int("max_retries", maxRetries),
+			zap.Error(err),
+			zap.Duration("retry_delay", delay),
+		)
 		time.Sleep(delay)
 	}
 
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ after %d attempts: %v (RabbitMQ is required for AI features)", maxRetries, lastErr)
+		zapLogger.Fatal("failed_to_connect_to_rabbitmq_after_retries",
+			zap.Int("max_retries", maxRetries),
+			zap.Error(lastErr),
+		)
 	}
 
 	// Initialize repositories
 	todoRepo := database.NewTodoRepository(db)
+	todoRepo.SetLogger(zapLogger)
 	oidcConfigRepo := database.NewOIDCConfigRepository(db)
 	contextRepo := database.NewAIContextRepository(db)
 	activityRepo := database.NewUserActivityRepository(db)
@@ -97,17 +136,22 @@ func main() {
 	// Set up automatic tag change detection in todo repository
 	todoRepo.SetTagStatsRepo(tagStatsRepo)
 	todoRepo.SetTagChangeHandler(func(ctx context.Context, userID uuid.UUID) error {
-		log.Printf("Tag change handler invoked for user %s", userID)
-		
+		zapLogger.Debug("tag_change_handler_invoked",
+			zap.String("user_id", userID.String()),
+		)
+
 		// Attempt to mark tag statistics as tainted (ensures stats will be refreshed)
 		var markTaintedErr error
 		_, err := tagStatsRepo.MarkTainted(ctx, userID)
 		if err != nil {
-			log.Printf("Failed to mark tag statistics as tainted for user %s: %v", userID, err)
+			zapLogger.Warn("failed_to_mark_tag_statistics_tainted",
+				zap.String("user_id", userID.String()),
+				zap.Error(err),
+			)
 			markTaintedErr = err
 			// Continue to enqueue the job despite this error to avoid inconsistent state
 		}
-		
+
 		// Always enqueue tag analysis job when tags change, even if MarkTainted failed
 		// The job will eventually fix the tainted state, allowing the system to self-heal
 		// Multiple jobs are fine - the analyzer will process them and re-analyze all todos
@@ -117,18 +161,26 @@ func main() {
 			notBefore := time.Now().Add(debounceDelay)
 			tagJob.NotBefore = &notBefore
 			if err := jobQueue.Enqueue(ctx, tagJob); err != nil {
-				log.Printf("Failed to enqueue tag analysis job for user %s: %v", userID, err)
+				zapLogger.Error("failed_to_enqueue_tag_analysis_job",
+					zap.String("user_id", userID.String()),
+					zap.Error(err),
+				)
 				// If both operations failed, return combined error
 				if markTaintedErr != nil {
 					return errors.Join(markTaintedErr, fmt.Errorf("failed to enqueue tag analysis job: %w", err))
 				}
 				return fmt.Errorf("failed to enqueue tag analysis job: %w", err)
 			}
-			log.Printf("Enqueued tag analysis job for user %s (debounced by %v) due to tag change", userID, debounceDelay)
+			zapLogger.Info("enqueued_tag_analysis_job",
+				zap.String("user_id", userID.String()),
+				zap.Duration("debounce_delay", debounceDelay),
+			)
 		} else {
-			log.Printf("Job queue not available, cannot enqueue tag analysis job for user %s", userID)
+			zapLogger.Warn("job_queue_not_available",
+				zap.String("user_id", userID.String()),
+			)
 		}
-		
+
 		// If only MarkTainted failed but job was enqueued successfully, ignore the error
 		// The enqueued job will eventually update statistics and fix the tainted state
 		return nil
@@ -139,9 +191,9 @@ func main() {
 	jwksManager := oidc.NewJWKSManager()
 
 	// Initialize AI provider
-	aiProvider, err := createAIProvider(cfg)
+	aiProvider, err := createAIProvider(cfg, zapLogger, debugMode)
 	if err != nil {
-		log.Printf("Warning: Failed to create AI provider: %v (AI features will be disabled)", err)
+		zapLogger.Warn("failed_to_create_ai_provider_ai_features_disabled", zap.Error(err))
 		aiProvider = nil
 	}
 
@@ -155,12 +207,12 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(oidcProvider, cfg.OIDCProvider)
-	todoHandler := handlers.NewTodoHandlerWithQueueAndTagStats(todoRepo, tagStatsRepo, jobQueue)
+	todoHandler := handlers.NewTodoHandlerWithQueueAndTagStats(todoRepo, tagStatsRepo, jobQueue, zapLogger)
 	healthChecker := handlers.NewHealthCheckerWithDeps(db, redisLimiter, jobQueue)
 
 	var chatHandler *handlers.ChatHandler
 	if chatService != nil && contextService != nil {
-		chatHandler = handlers.NewChatHandler(chatService, contextService, contextRepo)
+		chatHandler = handlers.NewChatHandler(chatService, contextService, contextRepo, zapLogger)
 	}
 
 	// Setup router
@@ -169,13 +221,13 @@ func main() {
 	// Apply middleware (order matters - executed in reverse order of registration)
 	// Note: In gorilla/mux, middleware executes in reverse order of registration
 	// Middleware registered LAST executes FIRST (outermost wrapper)
-	log.Println("Setting up middleware...")
+	zapLogger.Info("setting_up_middleware")
 
 	// Outermost middleware (executes first):
 	// 1. Security headers (should be set on all responses)
 	r.Use(middleware.SecurityHeaders(cfg.EnableHSTS))
 	// 2. CORS (handles preflight requests)
-	corsMW := middleware.CORSFromEnv(cfg.FrontendURL)
+	corsMW := middleware.CORSFromEnv(cfg.FrontendURL, zapLogger, debugMode)
 	r.Use(corsMW)
 	// 3. Request size limits (protects against DoS)
 	r.Use(middleware.MaxRequestSize(middleware.DefaultMaxRequestSize))
@@ -184,13 +236,13 @@ func main() {
 	// 5. Request timeout (30 seconds default)
 	r.Use(middleware.Timeout(30 * time.Second))
 	// 6. Error handler (catches panics)
-	r.Use(middleware.ErrorHandler)
+	r.Use(middleware.ErrorHandler(zapLogger))
 	// 7. Audit logging (for security events)
-	r.Use(middleware.Audit)
+	r.Use(middleware.Audit(zapLogger))
 	// 8. Logging (innermost, executes last before handler)
-	r.Use(middleware.Logging)
+	r.Use(middleware.Logging(zapLogger))
 	// 9. Activity tracking (for authenticated requests)
-	r.Use(middleware.ActivityTracking(activityRepo))
+	r.Use(middleware.ActivityTracking(activityRepo, zapLogger))
 
 	log.Println("Middleware setup complete")
 
@@ -217,26 +269,26 @@ func main() {
 
 	// Protected auth routes
 	protectedAuthRouter := authRouter.PathPrefix("").Subrouter()
-	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
+	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider, zapLogger))
 	protectedAuthRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
 	protectedAuthRouter.HandleFunc("/me", authHandler.GetMe).Methods("GET")
 
 	// Todo routes (protected)
 	todosRouter := apiRouter.PathPrefix("/todos").Subrouter()
-	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
+	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider, zapLogger))
 	todosRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
 	todoHandler.RegisterRoutes(todosRouter)
 
 	// AI routes (protected)
 	aiRouter := apiRouter.PathPrefix("/ai").Subrouter()
-	aiRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider))
+	aiRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider, zapLogger))
 	aiRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
-	
+
 	// AI Context routes
 	aiContextHandler := handlers.NewAIContextHandler(contextRepo)
 	contextRouter := aiRouter.PathPrefix("/context").Subrouter()
 	aiContextHandler.RegisterRoutes(contextRouter)
-	
+
 	// Chat routes (if AI provider available)
 	if chatHandler != nil {
 		chatHandler.RegisterRoutes(aiRouter)
@@ -262,9 +314,11 @@ func main() {
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Server starting on port %s", cfg.ServerPort)
+		zapLogger.Info("server_starting",
+			zap.String("port", cfg.ServerPort),
+		)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed to start: %v", err)
+			zapLogger.Fatal("server_failed_to_start", zap.Error(err))
 		}
 	}()
 
@@ -273,34 +327,45 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Server shutting down...")
+	zapLogger.Info("server_shutting_down")
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		zapLogger.Fatal("server_forced_to_shutdown", zap.Error(err))
 	}
 
-	log.Println("Server exited")
+	zapLogger.Info("server_exited")
 }
 
 // createAIProvider creates an AI provider based on configuration
-func createAIProvider(cfg *config.Config) (ai.AIProvider, error) {
+func createAIProvider(cfg *config.Config, logger *zap.Logger, debugMode bool) (ai.AIProvider, error) {
 	if cfg.OpenAIKey == "" {
 		return nil, fmt.Errorf("OpenAI API key not configured")
 	}
 
-	// Create provider registry
-	registry := ai.NewProviderRegistry()
-	ai.RegisterOpenAI(registry)
-
-	// Get provider config
+	// Get provider type
 	providerType := cfg.AIProvider
 	if providerType == "" {
 		providerType = "openai"
 	}
+
+	// Create provider directly with logger support
+	if providerType == "openai" {
+		return ai.NewOpenAIProviderWithLogger(
+			cfg.OpenAIKey,
+			cfg.AIBaseURL,
+			cfg.AIModel,
+			logger,
+			debugMode,
+		), nil
+	}
+
+	// Fallback to registry for other providers (without logger)
+	registry := ai.NewProviderRegistry()
+	ai.RegisterOpenAI(registry)
 
 	config := map[string]string{
 		"api_key":  cfg.OpenAIKey,
@@ -315,7 +380,9 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, err := fmt.Fprintf(w, `{"status":"healthy","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339)); err != nil {
-		log.Printf("Failed to write health check response: %v", err)
+		// Use standard log here since we don't have logger in this context
+		// This is a fallback for a simple health check endpoint
+		_ = err
 	}
 }
 
@@ -324,6 +391,8 @@ func versionInfo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	// Only expose minimal version info (sanitized for security)
 	if _, err := fmt.Fprintf(w, `{"version":"1.0.0","timestamp":"%s"}`, time.Now().UTC().Format(time.RFC3339)); err != nil {
-		log.Printf("Failed to write version info response: %v", err)
+		// Use standard log here since we don't have logger in this context
+		// This is a fallback for a simple version endpoint
+		_ = err
 	}
 }

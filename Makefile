@@ -280,7 +280,7 @@ mod-tidy-check:
 		files="$$files go.sum"; \
 	fi; \
 	if ! git diff --exit-code $$files >/dev/null; then \
-		$(call print_error,Error: go module files are out of date. Please run 'go mod tidy' and commit the resulting changes.); \
+		echo "$(RED)Error: go module files are out of date. Please run 'go mod tidy' and commit the resulting changes.$(NC)"; \
 		exit 1; \
 	fi
 	$(call print_success,go.mod and go.sum are tidy!)

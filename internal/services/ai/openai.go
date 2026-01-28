@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/google/uuid"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
+	"go.uber.org/zap"
 )
 
 const (
@@ -47,34 +49,17 @@ type OpenAIProvider struct {
 	model           string
 	maxTagsInPrompt int
 	maxTagTokens    int
+	logger          *zap.Logger
+	debugMode       bool
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
 func NewOpenAIProvider(apiKey string, model string) *OpenAIProvider {
-	if model == "" {
-		model = DefaultOpenAIModel
-	}
-
-	httpClient := &http.Client{
-		Timeout: DefaultTimeout,
-	}
-
-	client := openai.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithBaseURL(DefaultOpenAIBaseURL),
-		option.WithHTTPClient(httpClient),
-	)
-
-	return &OpenAIProvider{
-		client:          client,
-		model:           model,
-		maxTagsInPrompt: DefaultMaxTagsInPrompt,
-		maxTagTokens:    DefaultMaxTagTokens,
-	}
+	return NewOpenAIProviderWithLogger(apiKey, DefaultOpenAIBaseURL, model, nil, false)
 }
 
-// NewOpenAIProviderWithConfig creates a new OpenAI provider with custom configuration
-func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *OpenAIProvider {
+// NewOpenAIProviderWithLogger creates a new OpenAI provider with logger support
+func NewOpenAIProviderWithLogger(apiKey string, baseURL string, model string, logger *zap.Logger, debugMode bool) *OpenAIProvider {
 	if model == "" {
 		model = DefaultOpenAIModel
 	}
@@ -97,7 +82,14 @@ func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *O
 		model:           model,
 		maxTagsInPrompt: DefaultMaxTagsInPrompt,
 		maxTagTokens:    DefaultMaxTagTokens,
+		logger:          logger,
+		debugMode:       debugMode,
 	}
+}
+
+// NewOpenAIProviderWithConfig creates a new OpenAI provider with custom configuration
+func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *OpenAIProvider {
+	return NewOpenAIProviderWithLogger(apiKey, baseURL, model, nil, false)
 }
 
 // AnalyzeTask analyzes a task and returns suggested tags and time horizon
@@ -109,6 +101,21 @@ func (p *OpenAIProvider) AnalyzeTask(ctx context.Context, text string, userConte
 // AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon
 // tagStats is optional tag statistics to guide tag selection (prefer existing tags)
 func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
+	// Extract request ID and user ID from context for logging
+	requestID := ExtractRequestID(ctx)
+	var userIDStr string
+	if userID := ctx.Value(UserIDContextKey()); userID != nil {
+		if id, ok := userID.(uuid.UUID); ok {
+			userIDStr = id.String()
+		}
+	}
+	var todoIDStr string
+	if todoID := ctx.Value(TodoIDContextKey()); todoID != nil {
+		if id, ok := todoID.(uuid.UUID); ok {
+			todoIDStr = id.String()
+		}
+	}
+
 	// Build prompt with user context, due date, creation time, and tag statistics
 	prompt := p.buildAnalysisPrompt(text, dueDate, createdAt, userContext, tagStats)
 
@@ -116,6 +123,20 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage("You are a helpful assistant that analyzes todo items and suggests tags and time horizons. Respond with valid JSON only."),
 		openai.UserMessage(prompt),
+	}
+
+	// Log request if debug mode enabled
+	if p.logger != nil && p.debugMode {
+		p.logger.Debug("llm_api_request",
+			zap.String("operation", "analyze_task"),
+			zap.String("model", p.model),
+			zap.Int("prompt_length", len(prompt)),
+			zap.Int("message_count", len(messages)),
+			zap.String("prompt_preview", SanitizePrompt(prompt, true)),
+			zap.String("user_id", userIDStr),
+			zap.String("todo_id", todoIDStr),
+			zap.String("request_id", requestID),
+		)
 	}
 
 	// Create request with JSON response format
@@ -131,8 +152,30 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 		// Some models only support their default temperature value
 	}
 
+	startTime := time.Now()
 	resp, err := p.client.Chat.Completions.New(ctx, req)
+	latency := time.Since(startTime)
 	if err != nil {
+		// Wrap error with API error details for better handling
+		if apiErr := ExtractAPIError(err); apiErr != nil {
+			return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", apiErr)
+		}
+		return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", err)
+	}
+
+	if err != nil {
+		// Log error if debug mode enabled
+		if p.logger != nil && p.debugMode {
+			p.logger.Debug("llm_api_error",
+				zap.String("operation", "analyze_task"),
+				zap.String("model", p.model),
+				zap.Error(err),
+				zap.String("user_id", userIDStr),
+				zap.String("todo_id", todoIDStr),
+				zap.String("request_id", requestID),
+				zap.Duration("latency_ms", latency),
+			)
+		}
 		// Wrap error with API error details for better handling
 		if apiErr := ExtractAPIError(err); apiErr != nil {
 			return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", apiErr)
@@ -146,6 +189,20 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 
 	// Get content from first choice (Content is a string directly in the SDK)
 	content := resp.Choices[0].Message.Content
+
+	// Log response if debug mode enabled
+	if p.logger != nil && p.debugMode {
+		p.logger.Debug("llm_api_response",
+			zap.String("operation", "analyze_task"),
+			zap.String("model", p.model),
+			zap.Int("response_length", len(content)),
+			zap.String("response_preview", SanitizeResponse(content, true)),
+			zap.String("user_id", userIDStr),
+			zap.String("todo_id", todoIDStr),
+			zap.String("request_id", requestID),
+			zap.Int64("latency_ms", latency.Milliseconds()),
+		)
+	}
 
 	// Parse response - OpenAI returns JSON in content field
 	var analysis struct {
@@ -185,6 +242,15 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 
 // Chat handles a chat message and returns the AI response
 func (p *OpenAIProvider) Chat(ctx context.Context, messages []ChatMessage, userContext *models.AIContext) (*ChatResponse, error) {
+	// Extract request ID and user ID from context for logging
+	requestID := ExtractRequestID(ctx)
+	var userIDStr string
+	if userID := ctx.Value("user_id"); userID != nil {
+		if id, ok := userID.(uuid.UUID); ok {
+			userIDStr = id.String()
+		}
+	}
+
 	// Build system message with user context if available
 	systemContent := "You are a helpful assistant that helps users configure how their todos are analyzed and categorized. Be concise and helpful."
 	if userContext != nil && userContext.ContextSummary != "" {
@@ -209,6 +275,22 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []ChatMessage, userC
 		}
 	}
 
+	// Log request if debug mode enabled
+	if p.logger != nil && p.debugMode {
+		messagePreviews := make([]string, 0, len(messages))
+		for _, msg := range messages {
+			messagePreviews = append(messagePreviews, SanitizePrompt(msg.Content, false))
+		}
+		p.logger.Debug("llm_api_request",
+			zap.String("operation", "chat"),
+			zap.String("model", p.model),
+			zap.Int("message_count", len(openAIMessages)),
+			zap.Strings("message_previews", messagePreviews),
+			zap.String("user_id", userIDStr),
+			zap.String("request_id", requestID),
+		)
+	}
+
 	req := openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(p.model),
 		Messages: openAIMessages,
@@ -216,8 +298,22 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []ChatMessage, userC
 		// Some models only support their default temperature value
 	}
 
+	startTime := time.Now()
 	resp, err := p.client.Chat.Completions.New(ctx, req)
+	latency := time.Since(startTime)
+
 	if err != nil {
+		// Log error if debug mode enabled
+		if p.logger != nil && p.debugMode {
+			p.logger.Debug("llm_api_error",
+				zap.String("operation", "chat"),
+				zap.String("model", p.model),
+				zap.Error(err),
+				zap.String("user_id", userIDStr),
+				zap.String("request_id", requestID),
+				zap.Int64("latency_ms", latency.Milliseconds()),
+			)
+		}
 		// Wrap error with API error details for better handling
 		if apiErr := ExtractAPIError(err); apiErr != nil {
 			return nil, fmt.Errorf("failed to chat: %w", apiErr)
@@ -232,6 +328,19 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []ChatMessage, userC
 	// Get content from first choice (Content is a string directly in the SDK)
 	content := resp.Choices[0].Message.Content
 
+	// Log response if debug mode enabled
+	if p.logger != nil && p.debugMode {
+		p.logger.Debug("llm_api_response",
+			zap.String("operation", "chat"),
+			zap.String("model", p.model),
+			zap.Int("response_length", len(content)),
+			zap.String("response_preview", SanitizeResponse(content, true)),
+			zap.String("user_id", userIDStr),
+			zap.String("request_id", requestID),
+			zap.Int64("latency_ms", latency.Milliseconds()),
+		)
+	}
+
 	return &ChatResponse{
 		Message:     content,
 		NeedsUpdate: true, // Always update context after chat
@@ -240,6 +349,15 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []ChatMessage, userC
 
 // SummarizeContext summarizes a conversation history into a context summary
 func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHistory []ChatMessage) (string, error) {
+	// Extract request ID and user ID from context for logging
+	requestID := ExtractRequestID(ctx)
+	var userIDStr string
+	if userID := ctx.Value("user_id"); userID != nil {
+		if id, ok := userID.(uuid.UUID); ok {
+			userIDStr = id.String()
+		}
+	}
+
 	// Build summary prompt
 	prompt := "Summarize the following conversation into a concise context that can be used to better understand the user's preferences for todo categorization. Focus on key preferences and patterns.\n\nConversation:\n"
 
@@ -252,6 +370,19 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 		openai.UserMessage(prompt),
 	}
 
+	// Log request if debug mode enabled
+	if p.logger != nil && p.debugMode {
+		p.logger.Debug("llm_api_request",
+			zap.String("operation", "summarize_context"),
+			zap.String("model", p.model),
+			zap.Int("conversation_length", len(conversationHistory)),
+			zap.Int("prompt_length", len(prompt)),
+			zap.String("prompt_preview", SanitizePrompt(prompt, false)),
+			zap.String("user_id", userIDStr),
+			zap.String("request_id", requestID),
+		)
+	}
+
 	req := openai.ChatCompletionNewParams{
 		Model:     shared.ChatModel(p.model),
 		Messages:  messages,
@@ -260,8 +391,22 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 		// Some models only support their default temperature value
 	}
 
+	startTime := time.Now()
 	resp, err := p.client.Chat.Completions.New(ctx, req)
+	latency := time.Since(startTime)
+
 	if err != nil {
+		// Log error if debug mode enabled
+		if p.logger != nil && p.debugMode {
+			p.logger.Debug("llm_api_error",
+				zap.String("operation", "summarize_context"),
+				zap.String("model", p.model),
+				zap.Error(err),
+				zap.String("user_id", userIDStr),
+				zap.String("request_id", requestID),
+				zap.Int64("latency_ms", latency.Milliseconds()),
+			)
+		}
 		// Wrap error with API error details for better handling
 		if apiErr := ExtractAPIError(err); apiErr != nil {
 			return "", fmt.Errorf("failed to summarize context: %w", apiErr)
@@ -275,6 +420,19 @@ func (p *OpenAIProvider) SummarizeContext(ctx context.Context, conversationHisto
 
 	// Get content from first choice (Content is a string directly in the SDK)
 	content := resp.Choices[0].Message.Content
+
+	// Log response if debug mode enabled
+	if p.logger != nil && p.debugMode {
+		p.logger.Debug("llm_api_response",
+			zap.String("operation", "summarize_context"),
+			zap.String("model", p.model),
+			zap.Int("response_length", len(content)),
+			zap.String("response_preview", SanitizeResponse(content, true)),
+			zap.String("user_id", userIDStr),
+			zap.String("request_id", requestID),
+			zap.Duration("latency_ms", latency),
+		)
+	}
 
 	return content, nil
 }

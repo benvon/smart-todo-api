@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -49,7 +48,9 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 		defer func() {
 			if closeErr := resp.Body.Close(); closeErr != nil {
 				// Log error but don't fail the request - body already read
-				log.Printf("Failed to close discovery response body: %v", closeErr)
+				// Use standard log here since OIDC provider doesn't have logger
+				// This is a minor cleanup error, can be ignored
+				_ = closeErr
 			}
 		}()
 		var discovery struct {
@@ -112,7 +113,7 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 type LoginConfig struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
-	ClientID             string `json:"client_id"`
-	RedirectURI          string `json:"redirect_uri"`
-	Scope                string `json:"scope"`
+	ClientID              string `json:"client_id"`
+	RedirectURI           string `json:"redirect_uri"`
+	Scope                 string `json:"scope"`
 }
