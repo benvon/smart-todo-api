@@ -60,13 +60,19 @@ Build output is in `web/dist/`:
 
 ```
 app-entry.js
-  ├─ config.js (sets window.API_BASE_URL)
+  ├─ config.js (sets window.API_BASE_URL, CONFIG_LOADED)
   ├─ jwt.js (token utilities)
   ├─ dateutils.js (uses chrono-node, dayjs)
-  ├─ api.js (API client)
+  ├─ api.js (API client; exports only, no window.*)
   ├─ auth.js (auth flow)
-  ├─ chat.js (chat functionality)
-  └─ app.js (main app logic)
+  ├─ chat.js (chat functionality; uses context.js)
+  ├─ profile.js (profile panel; uses panels/panel.js, cards/profile-content.js, context.js)
+  ├─ app.js (bootstrap, wiring, API status, add-todo)
+  ├─ todo-list.js (todo list rendering, drag-drop; uses cards/todo-card.js)
+  ├─ context.js (single source of truth for AI context)
+  ├─ panels/panel.js (panel helper; no external deps)
+  ├─ cards/todo-card.js (todo card builder; uses dateutils.js)
+  └─ cards/profile-content.js (profile panel body; uses html-utils.js)
 
 index-entry.js
   ├─ config.js
@@ -80,7 +86,7 @@ index-entry.js
 
 ## Module Structure
 
-All JavaScript files are ES6 modules that export functions and also expose them globally for backward compatibility. The build system bundles these modules together.
+All JavaScript files are ES6 modules. The API module exports only; callers use ES module imports. The build system bundles these modules together.
 
 ### Key Modules
 
@@ -92,10 +98,16 @@ All JavaScript files are ES6 modules that export functions and also expose them 
 
 - **config.js** - API configuration loader
 - **jwt.js** - JWT token management
-- **api.js** - API client functions
+- **api.js** - API client functions (exports only; no `window.*` assignments)
 - **auth.js** - OIDC authentication flow
-- **chat.js** - AI chat interface
-- **app.js** - Main application logic
+- **context.js** - Single source of truth for current AI context (`getContext`, `setContext`); used by chat and profile
+- **panels/panel.js** - Panel helper (show/hide, setContent with loading/error/content); vanilla JS, no external dependency
+- **cards/todo-card.js** - Builds a single todo card DOM node; used by todo-list.js
+- **cards/profile-content.js** - Builds profile panel body content (user info, context textarea, tag stats, logout)
+- **todo-list.js** - Todo list state, rendering, drag-drop, and todo actions; exports `loadTodos()`
+- **chat.js** - AI chat interface; uses context.js
+- **profile.js** - Profile panel (single load path, timeout, panel + profile-content builder); uses context.js
+- **app.js** - Bootstrap, event wiring, API status indicator/dropdown, add-todo handler
 
 ## Quality Tools
 
