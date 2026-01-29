@@ -73,57 +73,50 @@ func (m *JWKSManager) GetJWKS(ctx context.Context, jwksURL string) (jwk.Set, err
 }
 
 func (m *JWKSManager) fetchJWKS(ctx context.Context, jwksURL string) (jwk.Set, error) {
-	// Basic URL validation - ensure it's an HTTPS URL
+	if err := validateJWKSUrl(jwksURL); err != nil {
+		return nil, err
+	}
+	body, err := fetchJWKSBody(ctx, jwksURL)
+	if err != nil {
+		return nil, err
+	}
+	return jwk.Parse(body)
+}
+
+func validateJWKSUrl(jwksURL string) error {
 	if len(jwksURL) == 0 {
-		return nil, fmt.Errorf("JWKS URL cannot be empty")
+		return fmt.Errorf("JWKS URL cannot be empty")
 	}
 	if !strings.HasPrefix(jwksURL, "https://") {
-		return nil, fmt.Errorf("JWKS URL must use HTTPS")
+		return fmt.Errorf("JWKS URL must use HTTPS")
 	}
+	return nil
+}
 
+func fetchJWKSBody(ctx context.Context, jwksURL string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail - body already read
-			// This is in a service layer, logging would require passing logger
-			// The error is non-critical as the body is already consumed
-			_ = err // Explicitly ignore error to satisfy linter
-		}
-	}()
-
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("JWKS endpoint returned status %d", resp.StatusCode)
 	}
-
-	// Limit response body size to prevent DoS attacks
 	limitedReader := io.LimitReader(resp.Body, MaxJWKSSize)
 	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read JWKS response: %w", err)
 	}
-
-	// Check if we hit the size limit
 	if len(body) >= MaxJWKSSize {
-		// Try to read one more byte to see if there's more data
 		var extra [1]byte
 		if n, _ := resp.Body.Read(extra[:]); n > 0 {
 			return nil, fmt.Errorf("JWKS response exceeds maximum size of %d bytes", MaxJWKSSize)
 		}
 	}
-
-	keys, err := jwk.Parse(body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse JWKS: %w", err)
-	}
-
-	return keys, nil
+	return body, nil
 }

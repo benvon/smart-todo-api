@@ -86,6 +86,14 @@ go test ./internal/handlers/...
 go test -v ./...
 ```
 
+## Cyclomatic Complexity
+
+We enforce a **cyclomatic complexity** limit via `gocyclo` in golangci-lint (see [.golangci.yml](.golangci.yml)). The threshold is **10**.
+
+- **What it measures:** The number of linearly independent paths through a function (each `if`, `for`, `case`, `&&`, `||` adds to complexity).
+- **How to fix violations:** Extract helpers (e.g. small functions for error handling, validation, or branches), split large conditionals, or break up long functions. Prefer table-driven tests and extracted helpers in tests to keep complexity low.
+- **CI:** Pre-commit (golangci-lint hook), local `make lint`, and GitHub Actions all run golangci-lint, including gocyclo. Fix any new gocyclo issues before merging.
+
 ## Test Structure
 
 Tests follow Go conventions:

@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/benvon/smart-todo/internal/database"
-	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/benvon/smart-todo/internal/request"
 	"github.com/gorilla/mux"
 )
 
@@ -38,7 +38,7 @@ type GetContextResponse struct {
 
 // GetContext returns the current user's AI context
 func (h *AIContextHandler) GetContext(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
@@ -76,7 +76,7 @@ type UpdateContextRequest struct {
 
 // UpdateContext updates the current user's AI context
 func (h *AIContextHandler) UpdateContext(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return

@@ -7,6 +7,7 @@ import { showError } from './error-utils.js';
 import { escapeHtml } from './html-utils.js';
 
 let currentContext = '';
+let isLoadingProfileData = false;
 
 /**
  * Initialize profile panel
@@ -25,7 +26,10 @@ export function initProfile() {
     // Open profile panel
     profileButton.addEventListener('click', () => {
         profilePanel.style.display = 'flex';
-        loadProfileData();
+        // Use setTimeout to ensure DOM is ready after display change
+        setTimeout(() => {
+            loadProfileData();
+        }, 0);
     });
 
     // Close profile panel
@@ -68,34 +72,117 @@ export function initProfile() {
  * Load profile data (user info, context, tag stats)
  */
 async function loadProfileData() {
-    // Load all data in parallel using Promise.allSettled
-    const results = await Promise.allSettled([
-        getCurrentUser(),
-        getAIContext(),
-        loadTagStats()
-    ]);
-
-    // Handle user info result
-    const [userResult, contextResult] = results;
+    // Prevent concurrent loads
+    if (isLoadingProfileData) {
+        logger.log('Profile data load already in progress, skipping...');
+        return;
+    }
     
-    if (userResult.status === 'fulfilled' && userResult.value.data) {
-        const user = userResult.value.data;
-        const userNameEl = document.getElementById('user-name');
-        const userEmailEl = document.getElementById('user-email');
+    isLoadingProfileData = true;
+    
+    // Set initial loading states
+    const userNameEl = document.getElementById('user-name');
+    const userEmailEl = document.getElementById('user-email');
+    const contextTextarea = document.getElementById('context-textarea');
+    const tagStatsEl = document.getElementById('tag-stats');
+    
+    if (userNameEl) {
+        userNameEl.textContent = 'Loading...';
+    }
+    if (userEmailEl) {
+        userEmailEl.textContent = 'Loading...';
+    }
+    if (contextTextarea) {
+        contextTextarea.value = '';
+    }
+    if (tagStatsEl) {
+        tagStatsEl.innerHTML = '<p class="loading-message">Loading tag statistics...</p>';
+    }
+    
+    try {
+        // Load all data in parallel using Promise.allSettled
+        const results = await Promise.allSettled([
+            getCurrentUser(),
+            getAIContext(),
+            getTagStats()
+        ]);
+
+        // Extract all three results
+        const [userResult, contextResult, tagStatsResult] = results;
+        
+        // Handle user info result
+        handleUserResult(userResult, userNameEl, userEmailEl);
+        
+        // Handle AI context result
+        handleContextResult(contextResult, contextTextarea);
+        
+        // Handle tag stats result
+        handleTagStatsResult(tagStatsResult, tagStatsEl);
+    } catch (error) {
+        logger.error('Unexpected error loading profile data:', error);
         if (userNameEl) {
-            userNameEl.textContent = user.name || 'Not provided';
+            userNameEl.textContent = 'Error loading';
         }
         if (userEmailEl) {
-            userEmailEl.textContent = user.email || 'Not provided';
+            userEmailEl.textContent = 'Error loading';
+        }
+        if (contextTextarea) {
+            contextTextarea.value = '';
+        }
+        if (tagStatsEl) {
+            tagStatsEl.innerHTML = '<p class="loading-message">Error loading tag statistics</p>';
+        }
+    } finally {
+        isLoadingProfileData = false;
+    }
+}
+
+/**
+ * Handle user result from API
+ */
+function handleUserResult(userResult, userNameEl, userEmailEl) {
+    if (!userNameEl || !userEmailEl) {
+        logger.warn('User info elements not found');
+        return;
+    }
+    
+    if (userResult.status === 'fulfilled') {
+        if (userResult.value && userResult.value.data) {
+            const user = userResult.value.data;
+            // Ensure user is an object before accessing properties
+            if (typeof user === 'object' && user !== null) {
+                userNameEl.textContent = (user.name && user.name.trim()) ? user.name : 'Not provided';
+                userEmailEl.textContent = (user.email && user.email.trim()) ? user.email : 'Not provided';
+            } else {
+                logger.warn('User data is not an object:', user);
+                userNameEl.textContent = 'Not available';
+                userEmailEl.textContent = 'Not available';
+            }
+        } else {
+            // Response was successful but data is missing
+            logger.warn('User data missing from response:', userResult.value);
+            userNameEl.textContent = 'Not available';
+            userEmailEl.textContent = 'Not available';
         }
     } else if (userResult.status === 'rejected') {
         logger.error('Failed to load user data:', userResult.reason);
+        userNameEl.textContent = 'Error loading';
+        userEmailEl.textContent = 'Error loading';
         if (!userResult.reason?.isAuthError) {
             showError(userResult.reason?.message || 'Failed to load user data');
         }
     }
+}
 
-    // Handle AI context result
+/**
+ * Handle context result from API
+ */
+function handleContextResult(contextResult, contextTextarea) {
+    if (!contextTextarea) {
+        logger.warn('Context textarea element not found');
+        return;
+    }
+    
     if (contextResult.status === 'fulfilled') {
         // Handle context_summary - it can be null, undefined, or empty string
         if (contextResult.value && contextResult.value.data) {
@@ -113,40 +200,37 @@ async function loadProfileData() {
     }
     
     // Update textarea with current context (whether loaded or cleared on error)
-    const contextTextarea = document.getElementById('context-textarea');
-    if (contextTextarea) {
-        contextTextarea.value = currentContext;
-    }
-
-    // Tag stats error handling is done in loadTagStats function itself
+    contextTextarea.value = currentContext;
 }
 
 /**
- * Load tag statistics
+ * Handle tag stats result from API
  */
-async function loadTagStats() {
-    const tagStatsEl = document.getElementById('tag-stats');
+function handleTagStatsResult(tagStatsResult, tagStatsEl) {
     if (!tagStatsEl) {
+        logger.warn('Tag stats element not found');
         return;
     }
-
-    try {
-        const response = await getTagStats();
-        logger.log('Tag stats response:', response);
-        
-        if (response && response.data) {
-            const stats = response.data;
+    
+    if (tagStatsResult.status === 'fulfilled') {
+        if (tagStatsResult.value && tagStatsResult.value.data) {
+            const stats = tagStatsResult.value.data;
             logger.log('Tag stats data:', stats);
             renderTagStats(tagStatsEl, stats);
         } else {
-            logger.warn('Tag stats response missing data:', response);
+            logger.warn('Tag stats response missing data:', tagStatsResult.value);
             tagStatsEl.innerHTML = '<p class="loading-message">No tag statistics available</p>';
         }
-    } catch (error) {
-        logger.error('Failed to load tag statistics:', error);
+    } else if (tagStatsResult.status === 'rejected') {
+        logger.error('Failed to load tag statistics:', tagStatsResult.reason);
         tagStatsEl.innerHTML = '<p class="loading-message">Failed to load tag statistics</p>';
+        if (!tagStatsResult.reason?.isAuthError) {
+            // Don't show error toast for tag stats failures - just log and show in UI
+            logger.warn('Tag stats error (non-auth):', tagStatsResult.reason?.message);
+        }
     }
 }
+
 
 /**
  * Render tag statistics
@@ -220,6 +304,9 @@ async function handleSaveContext() {
         } else {
             currentContext = contextToSave;
         }
+        
+        // Update textarea to match saved value (in case server modified it)
+        contextTextarea.value = currentContext;
         
         // Change button text temporarily to show success
         saveButton.textContent = 'Saved!';

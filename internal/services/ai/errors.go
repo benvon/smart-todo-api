@@ -125,62 +125,37 @@ func ExtractAPIError(err error) *APIError {
 
 // GetRetryDelay calculates the delay before retrying based on error type
 func GetRetryDelay(err error, attempt int) time.Duration {
-	// Cap attempt to prevent integer overflow (max 30 for uint32, max 63 for uint64)
-	// Using 20 as safe maximum for reasonable delays
-	maxAttempt := attempt
-	if maxAttempt > 20 {
-		maxAttempt = 20
-	}
-	if maxAttempt < 0 {
-		maxAttempt = 0
-	}
-
-	// Calculate safe shift amount in range [0, 10] and convert to uint safely
-	// This prevents integer overflow when converting to uint
-	// Explicitly check range before conversion so static analysis tools can verify safety
-	var shiftAmountUint uint
-	if maxAttempt < 0 {
-		shiftAmountUint = 0
-	} else if maxAttempt > 10 {
-		shiftAmountUint = 10
-	} else {
-		// maxAttempt is in range [0, 10], safe to convert
-		shiftAmountUint = uint(maxAttempt)
-	}
-
+	shift := retryShiftAmount(attempt)
 	if IsQuotaError(err) {
-		// Quota errors: exponential backoff starting at 1 hour
-		// shiftAmountUint is already in safe range [0, 10]
-		delay := time.Hour * time.Duration(1<<shiftAmountUint)
-		if delay > 24*time.Hour {
-			delay = 24 * time.Hour
-		}
-		return delay
+		return capDuration(time.Hour*time.Duration(1<<shift), 24*time.Hour)
 	}
-
 	if IsRateLimitError(err) {
-		// Rate limit errors: exponential backoff starting at 60 seconds
-		// shiftAmountUint is already in safe range [0, 10]
-		delay := 60 * time.Second * time.Duration(1<<shiftAmountUint)
-		if delay > 15*time.Minute {
-			delay = 15 * time.Minute
+		delay := capDuration(60*time.Second*time.Duration(1<<shift), 15*time.Minute)
+		if apiErr := ExtractAPIError(err); apiErr != nil && apiErr.RetryAfter != nil && *apiErr.RetryAfter > delay {
+			delay = *apiErr.RetryAfter
 		}
-
-		// Try to extract retry-after from error
-		if apiErr := ExtractAPIError(err); apiErr != nil && apiErr.RetryAfter != nil {
-			if *apiErr.RetryAfter > delay {
-				delay = *apiErr.RetryAfter
-			}
-		}
-
 		return delay
 	}
+	return capDuration(5*time.Second*time.Duration(1<<shift), 5*time.Minute)
+}
 
-	// Default: exponential backoff starting at 5 seconds
-	// shiftAmountUint is already in safe range [0, 10]
-	delay := 5 * time.Second * time.Duration(1<<shiftAmountUint)
-	if delay > 5*time.Minute {
-		delay = 5 * time.Minute
+// retryShiftAmount caps attempt to [0, 20] and returns a shift in [0, 10] for exponential backoff.
+func retryShiftAmount(attempt int) uint {
+	if attempt < 0 {
+		attempt = 0
 	}
-	return delay
+	if attempt > 20 {
+		attempt = 20
+	}
+	if attempt > 10 {
+		return 10
+	}
+	return uint(attempt)
+}
+
+func capDuration(d, max time.Duration) time.Duration {
+	if d > max {
+		return max
+	}
+	return d
 }

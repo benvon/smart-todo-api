@@ -1,8 +1,6 @@
 package config
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,15 +11,109 @@ func contains(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }
 
+var allConfigEnvVars = []string{
+	"DATABASE_URL",
+	"RABBITMQ_URL",
+	"SERVER_PORT",
+	"BASE_URL",
+	"FRONTEND_URL",
+	"OPENAI_API_KEY",
+	"ENABLE_HSTS",
+	"OIDC_PROVIDER",
+	"REDIS_URL",
+	"RABBITMQ_PREFETCH",
+	"AI_PROVIDER",
+	"AI_MODEL",
+	"AI_BASE_URL",
+}
+
+func saveAndClearEnv(t *testing.T, keys []string) map[string]string {
+	t.Helper()
+	original := make(map[string]string)
+	for _, key := range keys {
+		original[key] = os.Getenv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Logf("Warning: failed to unset %s: %v", key, err)
+		}
+	}
+	return original
+}
+
+func setTestEnv(t *testing.T, vars map[string]string) {
+	t.Helper()
+	for key, value := range vars {
+		if value == "" {
+			_ = os.Unsetenv(key)
+		} else {
+			if err := os.Setenv(key, value); err != nil {
+				t.Fatalf("Failed to set env var %s: %v", key, err)
+			}
+		}
+	}
+}
+
+func restoreEnv(original map[string]string) {
+	for key, value := range original {
+		if value != "" {
+			_ = os.Setenv(key, value)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	}
+}
+
+func assertLoadError(t *testing.T, name string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Error("Expected error but got nil")
+		return
+	}
+	errMsg := err.Error()
+	if errMsg == "" {
+		t.Error("Expected error message but got empty string")
+		return
+	}
+	if name == "missing DATABASE_URL" && !contains(errMsg, "DATABASE_URL") {
+		t.Errorf("Expected error to mention DATABASE_URL, got: %s", errMsg)
+	}
+	if name == "missing RABBITMQ_URL" && !contains(errMsg, "RABBITMQ_URL") {
+		t.Errorf("Expected error to mention RABBITMQ_URL, got: %s", errMsg)
+	}
+}
+
+type loadTest struct {
+	name        string
+	envVars     map[string]string
+	expectError bool
+	validate    func(*testing.T, *Config)
+}
+
+func runLoadTestCase(t *testing.T, tt loadTest) {
+	t.Helper()
+	original := saveAndClearEnv(t, allConfigEnvVars)
+	defer restoreEnv(original)
+	setTestEnv(t, tt.envVars)
+
+	cfg, err := Load()
+	if tt.expectError {
+		assertLoadError(t, tt.name, err)
+		return
+	}
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("Config is nil")
+	}
+	if tt.validate != nil {
+		tt.validate(t, cfg)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	// Do not run in parallel - environment variables are global state
 
-	tests := []struct {
-		name        string
-		envVars     map[string]string
-		expectError bool
-		validate    func(*testing.T, *Config)
-	}{
+	tests := []loadTest{
 		{
 			name: "all required env vars set",
 			envVars: map[string]string{
@@ -54,7 +146,6 @@ func TestLoad(t *testing.T) {
 			},
 			expectError: true,
 			validate: func(t *testing.T, cfg *Config) {
-				// This should not be called when expectError is true, but if it is, cfg should be nil
 				if cfg != nil {
 					t.Error("Expected config to be nil when error occurs")
 				}
@@ -96,8 +187,8 @@ func TestLoad(t *testing.T) {
 		{
 			name: "OPENAI_API_KEY optional",
 			envVars: map[string]string{
-				"DATABASE_URL":  "postgres://user:pass@localhost/db",
-				"RABBITMQ_URL":  "amqp://guest:guest@localhost:5672/",
+				"DATABASE_URL":   "postgres://user:pass@localhost/db",
+				"RABBITMQ_URL":   "amqp://guest:guest@localhost:5672/",
 				"OPENAI_API_KEY": "sk-test-key",
 			},
 			expectError: false,
@@ -115,7 +206,6 @@ func TestLoad(t *testing.T) {
 			},
 			expectError: true,
 			validate: func(t *testing.T, cfg *Config) {
-				// This should not be called when expectError is true, but if it is, cfg should be nil
 				if cfg != nil {
 					t.Error("Expected config to be nil when error occurs")
 				}
@@ -123,103 +213,9 @@ func TestLoad(t *testing.T) {
 		},
 	}
 
-	// All config-related env vars that might be modified
-	allConfigEnvVars := []string{
-		"DATABASE_URL",
-		"RABBITMQ_URL",
-		"SERVER_PORT",
-		"BASE_URL",
-		"FRONTEND_URL",
-		"OPENAI_API_KEY",
-		"ENABLE_HSTS",
-		"OIDC_PROVIDER",
-		"REDIS_URL",
-		"RABBITMQ_PREFETCH",
-		"AI_PROVIDER",
-		"AI_MODEL",
-		"AI_BASE_URL",
-	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Save original env vars for all config-related vars
-			originalEnv := make(map[string]string)
-			for _, key := range allConfigEnvVars {
-				originalEnv[key] = os.Getenv(key)
-			}
-
-			// Clear all config-related env vars before setting test-specific ones
-			for _, key := range allConfigEnvVars {
-				if err := os.Unsetenv(key); err != nil {
-					t.Logf("Warning: failed to unset %s: %v", key, err)
-				}
-			}
-
-			// Set test env vars
-			for key, value := range tt.envVars {
-				if value == "" {
-					if err := os.Unsetenv(key); err != nil {
-						t.Logf("Warning: failed to unset %s: %v", key, err)
-					}
-				} else {
-					if err := os.Setenv(key, value); err != nil {
-						t.Fatalf("Failed to set env var %s: %v", key, err)
-					}
-				}
-			}
-
-			// Cleanup: restore original env vars
-			defer func() {
-				for key, value := range originalEnv {
-					if value != "" {
-						if err := os.Setenv(key, value); err != nil {
-							t.Logf("Warning: failed to restore %s: %v", key, err)
-						}
-					} else {
-						if err := os.Unsetenv(key); err != nil {
-							t.Logf("Warning: failed to unset %s: %v", key, err)
-						}
-					}
-				}
-			}()
-
-			cfg, err := Load()
-
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected error but got nil")
-					return
-				}
-				// Validate error message contains expected content
-				errMsg := err.Error()
-				if errMsg == "" {
-					t.Error("Expected error message but got empty string")
-				}
-				// Check for specific error messages based on test case
-				if tt.name == "missing DATABASE_URL" && !errors.Is(err, fmt.Errorf("DATABASE_URL is required")) {
-					if !contains(errMsg, "DATABASE_URL") {
-						t.Errorf("Expected error to mention DATABASE_URL, got: %s", errMsg)
-					}
-				}
-				if tt.name == "missing RABBITMQ_URL" && !errors.Is(err, fmt.Errorf("RABBITMQ_URL is required")) {
-					if !contains(errMsg, "RABBITMQ_URL") {
-						t.Errorf("Expected error to mention RABBITMQ_URL, got: %s", errMsg)
-					}
-				}
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
-			}
-
-			if cfg == nil {
-				t.Fatal("Config is nil")
-			}
-
-			if tt.validate != nil {
-				tt.validate(t, cfg)
-			}
+			runLoadTestCase(t, tt)
 		})
 	}
 }

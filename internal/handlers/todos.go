@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,9 +10,9 @@ import (
 
 	"github.com/benvon/smart-todo/internal/database"
 	logpkg "github.com/benvon/smart-todo/internal/logger"
-	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
 	"github.com/benvon/smart-todo/internal/queue"
+	"github.com/benvon/smart-todo/internal/request"
 	"github.com/benvon/smart-todo/internal/validation"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -23,32 +24,30 @@ import (
 type TodoHandler struct {
 	todoRepo     *database.TodoRepository
 	tagStatsRepo database.TagStatisticsRepositoryInterface
-	jobQueue     queue.JobQueue // Optional - if nil, job enqueueing is disabled
+	jobQueue     queue.JobQueue
 	logger       *zap.Logger
 }
 
-// NewTodoHandler creates a new todo handler
-func NewTodoHandler(todoRepo *database.TodoRepository, logger *zap.Logger) *TodoHandler {
-	return &TodoHandler{todoRepo: todoRepo, logger: logger}
+// TodoHandlerOption configures a TodoHandler.
+type TodoHandlerOption func(*TodoHandler)
+
+// WithTodoJobQueue sets the job queue for enqueueing analysis jobs.
+func WithTodoJobQueue(q queue.JobQueue) TodoHandlerOption {
+	return func(h *TodoHandler) { h.jobQueue = q }
 }
 
-// NewTodoHandlerWithQueue creates a new todo handler with job queue support
-func NewTodoHandlerWithQueue(todoRepo *database.TodoRepository, jobQueue queue.JobQueue, logger *zap.Logger) *TodoHandler {
-	return &TodoHandler{
-		todoRepo: todoRepo,
-		jobQueue: jobQueue,
-		logger:   logger,
-	}
+// WithTodoTagStatsRepo sets the tag statistics repository for /tags/stats.
+func WithTodoTagStatsRepo(r database.TagStatisticsRepositoryInterface) TodoHandlerOption {
+	return func(h *TodoHandler) { h.tagStatsRepo = r }
 }
 
-// NewTodoHandlerWithQueueAndTagStats creates a new todo handler with job queue and tag statistics support
-func NewTodoHandlerWithQueueAndTagStats(todoRepo *database.TodoRepository, tagStatsRepo database.TagStatisticsRepositoryInterface, jobQueue queue.JobQueue, logger *zap.Logger) *TodoHandler {
-	return &TodoHandler{
-		todoRepo:     todoRepo,
-		tagStatsRepo: tagStatsRepo,
-		jobQueue:     jobQueue,
-		logger:       logger,
+// NewTodoHandler creates a new todo handler. Options add job queue and/or tag stats support.
+func NewTodoHandler(todoRepo *database.TodoRepository, logger *zap.Logger, opts ...TodoHandlerOption) *TodoHandler {
+	h := &TodoHandler{todoRepo: todoRepo, logger: logger}
+	for _, o := range opts {
+		o(h)
 	}
+	return h
 }
 
 // RegisterRoutes registers todo routes on the given router
@@ -102,187 +101,227 @@ type ListTodosResponse struct {
 	TotalPages int            `json:"total_pages"`
 }
 
+// listParams holds parsed list query parameters.
+type listParams struct {
+	page        int
+	pageSize    int
+	timeHorizon *models.TimeHorizon
+	status      *models.TodoStatus
+}
+
+// parseListParams parses and validates list query params from r. Returns an error for invalid values.
+func parseListParams(r *http.Request) (listParams, error) {
+	out := listParams{
+		page:     parsePage(r.URL.Query().Get("page")),
+		pageSize: parsePageSize(r.URL.Query().Get("page_size")),
+	}
+	th, err := parseTimeHorizon(r.URL.Query().Get("time_horizon"))
+	if err != nil {
+		return listParams{}, err
+	}
+	out.timeHorizon = th
+	st, err := parseStatus(r.URL.Query().Get("status"))
+	if err != nil {
+		return listParams{}, err
+	}
+	out.status = st
+	return out, nil
+}
+
+func parsePage(p string) int {
+	if p == "" {
+		return 1
+	}
+	parsed, err := strconv.Atoi(p)
+	if err != nil || parsed <= 0 {
+		return 1
+	}
+	return parsed
+}
+
+func parsePageSize(ps string) int {
+	if ps == "" {
+		return DefaultPageSize
+	}
+	parsed, err := strconv.Atoi(ps)
+	if err != nil || parsed <= 0 {
+		return DefaultPageSize
+	}
+	if parsed > MaxPageSize {
+		return MaxPageSize
+	}
+	return parsed
+}
+
+func parseTimeHorizon(th string) (*models.TimeHorizon, error) {
+	if th == "" {
+		return nil, nil
+	}
+	if err := validation.ValidateTimeHorizon(th); err != nil {
+		return nil, err
+	}
+	h := models.TimeHorizon(th)
+	return &h, nil
+}
+
+func parseStatus(s string) (*models.TodoStatus, error) {
+	if s == "" {
+		return nil, nil
+	}
+	if err := validation.ValidateTodoStatus(s); err != nil {
+		return nil, err
+	}
+	st := models.TodoStatus(s)
+	return &st, nil
+}
+
 // ListTodos lists todos for the authenticated user with pagination
 func (h *TodoHandler) ListTodos(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
 	}
-
+	params, err := parseListParams(r)
+	if err != nil {
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
 	ctx := r.Context()
-
-	// Parse pagination parameters
-	page := 1
-	if p := r.URL.Query().Get("page"); p != "" {
-		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
-			page = parsed
-		}
-	}
-
-	pageSize := DefaultPageSize
-	if ps := r.URL.Query().Get("page_size"); ps != "" {
-		if parsed, err := strconv.Atoi(ps); err == nil && parsed > 0 {
-			if parsed > MaxPageSize {
-				pageSize = MaxPageSize
-			} else {
-				pageSize = parsed
-			}
-		}
-	}
-
-	// Parse and validate query parameters
-	var timeHorizon *models.TimeHorizon
-	if th := r.URL.Query().Get("time_horizon"); th != "" {
-		if err := validation.ValidateTimeHorizon(th); err != nil {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
-			return
-		}
-		thEnum := models.TimeHorizon(th)
-		timeHorizon = &thEnum
-	}
-
-	var status *models.TodoStatus
-	if s := r.URL.Query().Get("status"); s != "" {
-		if err := validation.ValidateTodoStatus(s); err != nil {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
-			return
-		}
-		sEnum := models.TodoStatus(s)
-		status = &sEnum
-	}
-
-	// Get todos with pagination
-	todos, total, err := h.todoRepo.GetByUserIDPaginated(ctx, user.ID, timeHorizon, status, page, pageSize)
+	todos, total, err := h.todoRepo.GetByUserIDPaginated(ctx, user.ID, params.timeHorizon, params.status, params.page, params.pageSize)
 	if err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to retrieve todos")
 		return
 	}
-
-	// Calculate total pages
-	totalPages := (total + pageSize - 1) / pageSize
+	totalPages := (total + params.pageSize - 1) / params.pageSize
 	if totalPages == 0 {
 		totalPages = 1
 	}
-
-	response := ListTodosResponse{
+	respondJSON(w, http.StatusOK, ListTodosResponse{
 		Todos:      todos,
-		Page:       page,
-		PageSize:   pageSize,
+		Page:       params.page,
+		PageSize:   params.pageSize,
 		Total:      total,
 		TotalPages: totalPages,
-	}
-
-	respondJSON(w, http.StatusOK, response)
+	})
 }
 
 // CreateTodo creates a new todo
 func (h *TodoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
 	}
-
-	var req CreateTodoRequest
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&req); err != nil {
-		// Check if error is due to request size limit
-		if maxBytesErr, ok := err.(*http.MaxBytesError); ok {
-			respondJSONError(w, http.StatusRequestEntityTooLarge, "Request Entity Too Large", fmt.Sprintf("Request body exceeds maximum size of %d bytes", maxBytesErr.Limit))
-			return
-		}
-		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid request body")
+	req, err := decodeCreateTodoRequest(r)
+	if err != nil {
+		respondCreateTodoDecodeError(w, err)
 		return
 	}
+	if err := validateCreateTodoRequest(w, &req); err != nil {
+		return
+	}
+	todo, err := buildTodoFromCreateRequest(&req, user)
+	if err != nil {
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if err := h.todoRepo.Create(r.Context(), todo); err != nil {
+		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to create todo")
+		return
+	}
+	h.enqueueCreateTodoJob(r.Context(), user, todo)
+	respondJSON(w, http.StatusCreated, todo)
+}
 
-	// Validate request
+func decodeCreateTodoRequest(r *http.Request) (CreateTodoRequest, error) {
+	var req CreateTodoRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	return req, err
+}
+
+func respondCreateTodoDecodeError(w http.ResponseWriter, err error) {
+	if maxBytesErr, ok := err.(*http.MaxBytesError); ok {
+		respondJSONError(w, http.StatusRequestEntityTooLarge, "Request Entity Too Large", fmt.Sprintf("Request body exceeds maximum size of %d bytes", maxBytesErr.Limit))
+		return
+	}
+	respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid request body")
+}
+
+func validateCreateTodoRequest(w http.ResponseWriter, req *CreateTodoRequest) error {
 	if err := validation.Validate.Struct(req); err != nil {
 		if validationErrors, ok := err.(validator.ValidationErrors); ok {
 			for _, fieldError := range validationErrors {
 				respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Validation failed: %s", fieldError.Error()))
-				return
+				return err
 			}
 		}
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Validation failed")
-		return
+		return err
 	}
-
-	// Sanitize text input
 	req.Text = validation.SanitizeText(req.Text)
 	if req.Text == "" {
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Text is required and cannot be empty after sanitization")
-		return
+		return fmt.Errorf("empty text")
 	}
-
-	// Validate length after sanitization
 	if len(req.Text) > MaxTodoTextLength {
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Text exceeds maximum length of %d characters", MaxTodoTextLength))
-		return
+		return fmt.Errorf("text too long")
 	}
+	return nil
+}
 
-	ctx := r.Context()
+func buildTodoFromCreateRequest(req *CreateTodoRequest, user *models.User) (*models.Todo, error) {
 	now := time.Now()
 	timeEntered := now.Format(time.RFC3339)
 	todo := &models.Todo{
 		ID:          uuid.New(),
 		UserID:      user.ID,
 		Text:        req.Text,
-		TimeHorizon: models.TimeHorizonSoon, // Default to 'soon'
+		TimeHorizon: models.TimeHorizonSoon,
 		Status:      models.TodoStatusPending,
 		Metadata: models.Metadata{
 			TagSources:  make(map[string]models.TagSource),
 			TimeEntered: &timeEntered,
 		},
 	}
-
-	// Parse due_date if provided
 	if req.DueDate != nil && *req.DueDate != "" {
 		dueDate, err := time.Parse(time.RFC3339, *req.DueDate)
 		if err != nil {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid due_date format. Expected RFC3339 format (e.g., 2024-03-15T14:30:00Z): %v", err))
-			return
+			return nil, fmt.Errorf("invalid due_date format. Expected RFC3339 format (e.g., 2024-03-15T14:30:00Z): %v", err)
 		}
 		todo.DueDate = &dueDate
 	}
+	return todo, nil
+}
 
-	if err := h.todoRepo.Create(ctx, todo); err != nil {
-		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to create todo")
-		return
-	}
-
-	// Enqueue AI analysis job if job queue is available
-	// Note: Tag change detection is handled automatically by the repository
-	if h.jobQueue != nil {
-		job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
-		if err := h.jobQueue.Enqueue(ctx, job); err != nil {
-			// Log error but don't fail the request
-			// The todo was created successfully, analysis can be retried later
-			h.logger.Warn("failed_to_enqueue_ai_analysis_job",
-				zap.String("operation", "create_todo"),
-				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
-				zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
-				zap.String("error", logpkg.SanitizeError(err)),
-			)
-		} else {
-			h.logger.Info("enqueued_ai_analysis_job",
-				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
-				zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
-			)
-		}
-	} else {
+func (h *TodoHandler) enqueueCreateTodoJob(ctx context.Context, user *models.User, todo *models.Todo) {
+	if h.jobQueue == nil {
 		h.logger.Debug("job_queue_not_available",
 			zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
 			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 		)
+		return
 	}
-
-	respondJSON(w, http.StatusCreated, todo)
+	job := queue.NewJob(queue.JobTypeTaskAnalysis, user.ID, &todo.ID)
+	if err := h.jobQueue.Enqueue(ctx, job); err != nil {
+		h.logger.Warn("failed_to_enqueue_ai_analysis_job",
+			zap.String("operation", "create_todo"),
+			zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
+			zap.String("error", logpkg.SanitizeError(err)),
+		)
+		return
+	}
+	h.logger.Info("enqueued_ai_analysis_job",
+		zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+		zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
+	)
 }
 
 // GetTodo retrieves a todo by ID
 func (h *TodoHandler) GetTodo(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
@@ -311,41 +350,121 @@ func (h *TodoHandler) GetTodo(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, todo)
 }
 
+// parseAndValidateUpdateRequest decodes the JSON body into UpdateTodoRequest.
+func parseAndValidateUpdateRequest(r *http.Request) (UpdateTodoRequest, error) {
+	var req UpdateTodoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return UpdateTodoRequest{}, err
+	}
+	return req, nil
+}
+
+// applyUpdatesToTodo applies req fields to todo. Validates and returns an error on invalid values.
+func applyUpdatesToTodo(todo *models.Todo, req *UpdateTodoRequest) error {
+	if todo.Metadata.TagSources == nil {
+		todo.Metadata.TagSources = make(map[string]models.TagSource)
+	}
+	if err := applyTextUpdate(todo, req.Text); err != nil {
+		return err
+	}
+	if err := applyTimeHorizonUpdate(todo, req.TimeHorizon); err != nil {
+		return err
+	}
+	if err := applyStatusUpdate(todo, req.Status); err != nil {
+		return err
+	}
+	if req.Tags != nil {
+		todo.Metadata.SetUserTags(*req.Tags)
+	}
+	return applyDueDateUpdate(todo, req.DueDate)
+}
+
+func applyTextUpdate(todo *models.Todo, text *string) error {
+	if text == nil {
+		return nil
+	}
+	sanitized := validation.SanitizeText(*text)
+	if sanitized == "" {
+		return fmt.Errorf("text cannot be empty after sanitization")
+	}
+	if len(sanitized) > MaxTodoTextLength {
+		return fmt.Errorf("text exceeds maximum length of %d characters", MaxTodoTextLength)
+	}
+	todo.Text = sanitized
+	return nil
+}
+
+func applyTimeHorizonUpdate(todo *models.Todo, th *string) error {
+	if th == nil {
+		return nil
+	}
+	if *th == "" {
+		override := false
+		todo.Metadata.TimeHorizonUserOverride = &override
+		return nil
+	}
+	if err := validation.ValidateTimeHorizon(*th); err != nil {
+		return err
+	}
+	todo.TimeHorizon = models.TimeHorizon(*th)
+	override := true
+	todo.Metadata.TimeHorizonUserOverride = &override
+	return nil
+}
+
+func applyStatusUpdate(todo *models.Todo, status *models.TodoStatus) error {
+	if status == nil {
+		return nil
+	}
+	if err := validation.ValidateTodoStatus(string(*status)); err != nil {
+		return err
+	}
+	todo.Status = *status
+	return nil
+}
+
+func applyDueDateUpdate(todo *models.Todo, dueDate *string) error {
+	if dueDate == nil {
+		return nil
+	}
+	if *dueDate == "" {
+		todo.DueDate = nil
+		return nil
+	}
+	parsed, err := time.Parse(time.RFC3339, *dueDate)
+	if err != nil {
+		return fmt.Errorf("invalid due_date format, expected RFC3339 (e.g. 2024-03-15T14:30:00Z): %w", err)
+	}
+	todo.DueDate = &parsed
+	return nil
+}
+
 // UpdateTodo updates an existing todo
 func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
 	}
-
 	vars := mux.Vars(r)
 	id, err := uuid.Parse(vars["id"])
 	if err != nil {
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid todo ID")
 		return
 	}
-
 	ctx := r.Context()
 	todo, err := h.todoRepo.GetByID(ctx, id)
 	if err != nil {
 		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
 		return
 	}
-
-	// Verify todo belongs to user
 	if todo.UserID != user.ID {
 		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
 		return
 	}
-
-	// Save old tags for tag change detection
 	oldTags := todo.Metadata.CategoryTags
-
-	var req UpdateTodoRequest
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&req); err != nil {
-		// Check if error is due to request size limit
+	req, err := parseAndValidateUpdateRequest(r)
+	if err != nil {
 		if maxBytesErr, ok := err.(*http.MaxBytesError); ok {
 			respondJSONError(w, http.StatusRequestEntityTooLarge, "Request Entity Too Large", fmt.Sprintf("Request body exceeds maximum size of %d bytes", maxBytesErr.Limit))
 			return
@@ -353,86 +472,20 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		respondJSONError(w, http.StatusBadRequest, "Bad Request", "Invalid request body")
 		return
 	}
-
-	// Initialize tag sources if nil
-	if todo.Metadata.TagSources == nil {
-		todo.Metadata.TagSources = make(map[string]models.TagSource)
+	if err := applyUpdatesToTodo(todo, &req); err != nil {
+		respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
 	}
-
-	// Update fields if provided with validation
-	// Note: Tag change detection is handled automatically by the repository
-	if req.Text != nil {
-		// Sanitize text input
-		sanitized := validation.SanitizeText(*req.Text)
-		if sanitized == "" {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", "Text cannot be empty after sanitization")
-			return
-		}
-		if len(sanitized) > MaxTodoTextLength {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Text exceeds maximum length of %d characters", MaxTodoTextLength))
-			return
-		}
-		todo.Text = sanitized
-	}
-	if req.TimeHorizon != nil {
-		// Empty string means clear the user override and let AI manage time horizon
-		if *req.TimeHorizon == "" {
-			// Clear the user override flag to allow AI to manage time horizon again
-			override := false
-			todo.Metadata.TimeHorizonUserOverride = &override
-		} else {
-			// Validate enum value
-			if err := validation.ValidateTimeHorizon(*req.TimeHorizon); err != nil {
-				respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
-				return
-			}
-			// User explicitly setting time horizon - mark as user override
-			todo.TimeHorizon = models.TimeHorizon(*req.TimeHorizon)
-			// Mark that user has manually set the time horizon
-			override := true
-			todo.Metadata.TimeHorizonUserOverride = &override
-		}
-	}
-	if req.Status != nil {
-		// Validate enum value
-		if err := validation.ValidateTodoStatus(string(*req.Status)); err != nil {
-			respondJSONError(w, http.StatusBadRequest, "Bad Request", err.Error())
-			return
-		}
-		todo.Status = *req.Status
-	}
-	if req.Tags != nil {
-		// User explicitly setting tags - mark all as user-defined
-		// This overrides any AI-generated tags
-		todo.Metadata.SetUserTags(*req.Tags)
-	}
-	if req.DueDate != nil {
-		// Empty string means clear the due date
-		if *req.DueDate == "" {
-			todo.DueDate = nil
-		} else {
-			dueDate, err := time.Parse(time.RFC3339, *req.DueDate)
-			if err != nil {
-				respondJSONError(w, http.StatusBadRequest, "Bad Request", fmt.Sprintf("Invalid due_date format. Expected RFC3339 format (e.g., 2024-03-15T14:30:00Z): %v", err))
-				return
-			}
-			todo.DueDate = &dueDate
-		}
-	}
-
 	if err := h.todoRepo.Update(ctx, todo, oldTags); err != nil {
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to update todo")
 		return
 	}
-
-	// Note: Tag change detection is handled automatically by the repository
-
 	respondJSON(w, http.StatusOK, todo)
 }
 
 // DeleteTodo deletes a todo
 func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
@@ -468,7 +521,7 @@ func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 // CompleteTodo marks a todo as completed
 func (h *TodoHandler) CompleteTodo(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
@@ -512,7 +565,7 @@ func (h *TodoHandler) CompleteTodo(w http.ResponseWriter, r *http.Request) {
 
 // AnalyzeTodo manually triggers AI analysis for a todo
 func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
@@ -580,7 +633,7 @@ type TagStatsResponse struct {
 
 // GetTagStats returns tag statistics for the authenticated user
 func (h *TodoHandler) GetTagStats(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return

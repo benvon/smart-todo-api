@@ -281,72 +281,69 @@ func (q *RabbitMQQueue) Consume(ctx context.Context, prefetchCount int) (<-chan 
 	msgChan := make(chan *Message, prefetchCount)
 	errChan := make(chan error, 1)
 
-	// Start goroutine to process deliveries
-	go func() {
-		defer close(msgChan)
-		defer close(errChan)
-		defer func() {
-			if err := consumeCh.Close(); err != nil {
-				// Log error but continue - channel may already be closed
-				_ = err
-			}
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case delivery, ok := <-deliveries:
-				if !ok {
-					// Channel closed (connection lost)
-					errChan <- fmt.Errorf("delivery channel closed")
-					return
-				}
-
-				// Check if message has expired
-				if delivery.Expiration != "" {
-					// Message expired, don't requeue
-					_ = delivery.Nack(false, false)
-					continue
-				}
-
-				// Unmarshal job
-				var job Job
-				if err := json.Unmarshal(delivery.Body, &job); err != nil {
-					// Invalid message, send to DLQ
-					_ = delivery.Nack(false, false)
-					errChan <- fmt.Errorf("failed to unmarshal job: %w", err)
-					continue
-				}
-
-				// Check if job should be processed now (respect NotBefore)
-				if !job.ShouldProcess() {
-					// Not ready yet, requeue for later
-					_ = delivery.Nack(false, true)
-					continue
-				}
-
-				// Create message wrapper
-				msg := &Message{
-					Job:         &job,
-					DeliveryTag: delivery.DeliveryTag,
-					Channel:     consumeCh,
-				}
-
-				// Send message (non-blocking)
-				select {
-				case <-ctx.Done():
-					// Context cancelled, requeue the message
-					_ = delivery.Nack(false, true)
-					return
-				case msgChan <- msg:
-					// Message sent successfully
-				}
-			}
-		}
-	}()
+	go runConsumeLoop(ctx, deliveries, consumeCh, msgChan, errChan)
 
 	return msgChan, errChan, nil
+}
+
+// runConsumeLoop receives deliveries, converts them to Messages, and sends on msgChan until ctx is done or deliveries close.
+func runConsumeLoop(ctx context.Context, deliveries <-chan amqp.Delivery, consumeCh *amqp.Channel, msgChan chan *Message, errChan chan error) {
+	defer close(msgChan)
+	defer close(errChan)
+	defer func() { _ = consumeCh.Close() }()
+	for processOneDelivery(ctx, deliveries, consumeCh, msgChan, errChan) {
+	}
+}
+
+// processOneDelivery receives one delivery (or handles ctx.Done), processes it, and optionally sends on msgChan. Returns false to stop the loop.
+func processOneDelivery(ctx context.Context, deliveries <-chan amqp.Delivery, ch *amqp.Channel, msgChan chan *Message, errChan chan error) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case delivery, ok := <-deliveries:
+		if !ok {
+			errChan <- fmt.Errorf("delivery channel closed")
+			return false
+		}
+		msg, err := processConsumeDelivery(delivery, ch)
+		if err != nil {
+			_ = delivery.Nack(false, false)
+			errChan <- err
+			return true
+		}
+		if msg == nil {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			_ = delivery.Nack(false, true)
+			return false
+		case msgChan <- msg:
+			return true
+		}
+	}
+}
+
+// processConsumeDelivery converts a delivery into a Message or returns an error.
+// Returns (nil, nil) when the message was expired or not ready (caller should not send to errChan).
+func processConsumeDelivery(delivery amqp.Delivery, ch *amqp.Channel) (*Message, error) {
+	if delivery.Expiration != "" {
+		_ = delivery.Nack(false, false)
+		return nil, nil
+	}
+	var job Job
+	if err := json.Unmarshal(delivery.Body, &job); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal job: %w", err)
+	}
+	if !job.ShouldProcess() {
+		_ = delivery.Nack(false, true)
+		return nil, nil
+	}
+	return &Message{
+		Job:         &job,
+		DeliveryTag: delivery.DeliveryTag,
+		Channel:     ch,
+	}, nil
 }
 
 // Dequeue removes and returns a message from the queue
@@ -421,10 +418,54 @@ func (q *RabbitMQQueue) HealthCheck(ctx context.Context) error {
 	if q.channel.IsClosed() {
 		return fmt.Errorf("RabbitMQ channel is closed")
 	}
-	// Try a lightweight operation to verify connectivity by passively declaring the queue.
-	// This performs a round-trip to the broker without modifying queue state.
 	if _, err := q.channel.QueueDeclarePassive(q.queueName, true, false, false, false, nil); err != nil {
 		return fmt.Errorf("RabbitMQ health check failed: %w", err)
 	}
 	return nil
+}
+
+// PurgeOlderThan implements DLQPurger. It Get()s from the DLQ, acks (discards) messages older than
+// retention, and nacks without requeue for newer ones so the loop can complete. Uses a dedicated
+// channel to avoid interfering with main queue operations.
+func (q *RabbitMQQueue) PurgeOlderThan(ctx context.Context, retention time.Duration) (int, error) {
+	ch, err := q.conn.Channel()
+	if err != nil {
+		return 0, fmt.Errorf("DLQ purge: open channel: %w", err)
+	}
+	defer func() { _ = ch.Close() }()
+	cutoff := time.Now().Add(-retention)
+	var purged int
+	for {
+		select {
+		case <-ctx.Done():
+			return purged, ctx.Err()
+		default:
+		}
+		msg, ok, err := ch.Get(q.dlqName, false)
+		if err != nil {
+			return purged, fmt.Errorf("DLQ purge get: %w", err)
+		}
+		if !ok {
+			return purged, nil
+		}
+		var age time.Time
+		if !msg.Timestamp.IsZero() {
+			age = msg.Timestamp
+		} else {
+			var j Job
+			if jsonErr := json.Unmarshal(msg.Body, &j); jsonErr == nil {
+				age = j.CreatedAt
+			} else {
+				age = time.Now()
+			}
+		}
+		if age.Before(cutoff) {
+			if ackErr := msg.Ack(false); ackErr != nil {
+				return purged, fmt.Errorf("DLQ purge ack: %w", ackErr)
+			}
+			purged++
+		} else {
+			_ = msg.Nack(false, false)
+		}
+	}
 }

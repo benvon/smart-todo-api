@@ -13,3 +13,17 @@ linters:
     - bidichk
     - contextcheck
     - ineffassign
+    - gocyclo
+  settings:
+    gocyclo:
+      min-complexity: 10
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters: [gocyclo]
+      - path: cmd/server/main\.go$
+        linters: [gocyclo]
+      - path: cmd/worker/main\.go$
+        linters: [gocyclo]
+      - path: cmd/configure/
+        linters: [gocyclo]

@@ -129,6 +129,8 @@ func main() {
 	todoRepo := database.NewTodoRepository(db)
 	todoRepo.SetLogger(zapLogger)
 	oidcConfigRepo := database.NewOIDCConfigRepository(db)
+	corsConfigRepo := database.NewCorsConfigRepository(db)
+	ratelimitConfigRepo := database.NewRatelimitConfigRepository(db)
 	contextRepo := database.NewAIContextRepository(db)
 	activityRepo := database.NewUserActivityRepository(db)
 	tagStatsRepo := database.NewTagStatisticsRepository(db)
@@ -207,7 +209,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(oidcProvider, cfg.OIDCProvider)
-	todoHandler := handlers.NewTodoHandlerWithQueueAndTagStats(todoRepo, tagStatsRepo, jobQueue, zapLogger)
+	todoHandler := handlers.NewTodoHandler(todoRepo, zapLogger, handlers.WithTodoTagStatsRepo(tagStatsRepo), handlers.WithTodoJobQueue(jobQueue))
 	healthChecker := handlers.NewHealthCheckerWithDeps(db, redisLimiter, jobQueue)
 
 	var chatHandler *handlers.ChatHandler
@@ -226,9 +228,15 @@ func main() {
 	// Outermost middleware (executes first):
 	// 1. Security headers (should be set on all responses)
 	r.Use(middleware.SecurityHeaders(cfg.EnableHSTS))
-	// 2. CORS (handles preflight requests)
-	corsMW := middleware.CORSFromEnv(cfg.FrontendURL, zapLogger, debugMode)
-	r.Use(corsMW)
+	// 2. CORS (load from DB, hot-reload; fallback to FRONTEND_URL)
+	corsReloader := middleware.NewCORSReloader(corsConfigRepo, cfg.FrontendURL, zapLogger, 1*time.Minute)
+	r.Use(corsReloader.Middleware())
+	// Rate limit middleware (applied selectively to specific routes, not globally)
+	rateLimitReloader := middleware.NewRateLimitReloader(redisLimiter.Client(), ratelimitConfigRepo, "5-S", zapLogger, 1*time.Minute)
+	if rateLimitReloader == nil {
+		zapLogger.Fatal("failed_to_create_rate_limit_reloader")
+	}
+	rateLimitMW := rateLimitReloader.Middleware()
 	// 3. Request size limits (protects against DoS)
 	r.Use(middleware.MaxRequestSize(middleware.DefaultMaxRequestSize))
 	// 4. Content-Type validation for POST/PATCH/PUT requests
@@ -264,25 +272,25 @@ func main() {
 
 	// Public auth routes with rate limiting (more restrictive for unauthenticated)
 	loginRouter := authRouter.PathPrefix("/oidc").Subrouter()
-	loginRouter.Use(middleware.RateLimitUnauthenticated(redisLimiter))
+	loginRouter.Use(rateLimitMW)
 	loginRouter.HandleFunc("/login", authHandler.GetOIDCLogin).Methods("GET")
 
 	// Protected auth routes
 	protectedAuthRouter := authRouter.PathPrefix("").Subrouter()
 	protectedAuthRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider, zapLogger))
-	protectedAuthRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
+	protectedAuthRouter.Use(rateLimitMW)
 	protectedAuthRouter.HandleFunc("/me", authHandler.GetMe).Methods("GET")
 
 	// Todo routes (protected)
 	todosRouter := apiRouter.PathPrefix("/todos").Subrouter()
 	todosRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider, zapLogger))
-	todosRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
+	todosRouter.Use(rateLimitMW)
 	todoHandler.RegisterRoutes(todosRouter)
 
 	// AI routes (protected)
 	aiRouter := apiRouter.PathPrefix("/ai").Subrouter()
 	aiRouter.Use(middleware.Auth(db, oidcProvider, jwksManager, cfg.OIDCProvider, zapLogger))
-	aiRouter.Use(middleware.RateLimitAuthenticated(redisLimiter))
+	aiRouter.Use(rateLimitMW)
 
 	// AI Context routes
 	aiContextHandler := handlers.NewAIContextHandler(contextRepo)
@@ -312,6 +320,27 @@ func main() {
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
+	// CORS and rate limit hot-reload loops
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	defer reloadCancel()
+	go corsReloader.Start(reloadCtx)
+	go rateLimitReloader.Start(reloadCtx)
+
+	// Start DLQ garbage collector if the queue implementation supports it
+	// Run every hour, retain messages for 24 hours
+	if dlqPurger, ok := jobQueue.(queue.DLQPurger); ok {
+		dlqGC := queue.NewGarbageCollector(dlqPurger, 1*time.Hour, 24*time.Hour)
+		go func() {
+			if err := dlqGC.Start(reloadCtx); err != nil && err != context.Canceled {
+				zapLogger.Error("dlq_garbage_collector_stopped_with_error", zap.Error(err))
+			}
+		}()
+		zapLogger.Info("started_dlq_garbage_collector",
+			zap.Duration("interval", 1*time.Hour),
+			zap.Duration("retention", 24*time.Hour),
+		)
+	}
+
 	// Start server in a goroutine
 	go func() {
 		zapLogger.Info("server_starting",
@@ -328,6 +357,7 @@ func main() {
 	<-quit
 
 	zapLogger.Info("server_shutting_down")
+	reloadCancel()
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

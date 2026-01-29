@@ -42,19 +42,7 @@ func CORS(allowedOrigins []string, logger *zap.Logger, debugMode bool) func(http
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-
-			// Validate origin format
-			if origin != "" && !isValidOrigin(origin) {
-				if debugMode {
-					logger.Debug("cors_invalid_origin_format",
-						zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
-					)
-				}
-				// Continue but don't set CORS headers for invalid origins
-				origin = ""
-			}
-
+			origin := normalizeCORSOrigin(r.Header.Get("Origin"), logger, debugMode)
 			if debugMode {
 				logger.Debug("cors_request",
 					zap.String("method", r.Method),
@@ -62,49 +50,68 @@ func CORS(allowedOrigins []string, logger *zap.Logger, debugMode bool) func(http
 					zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
 				)
 			}
-
-			// Check if origin is allowed
-			allowed := false
-			if origin != "" && origin != "null" {
-				for _, allowedOrigin := range allowedOrigins {
-					if origin == allowedOrigin {
-						allowed = true
-						break
-					}
-				}
-			}
-
-			// Handle preflight OPTIONS requests
+			allowed := originAllowed(origin, allowedOrigins)
 			if r.Method == http.MethodOptions {
-				if debugMode {
-					logger.Debug("cors_options_preflight",
-						zap.String("path", logpkg.SanitizePath(r.URL.Path)),
-						zap.Bool("allowed", allowed),
-					)
-				}
-				if allowed && origin != "" && origin != "null" {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-					w.Header().Set("Access-Control-Allow-Credentials", "true")
-					w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 24 hours
-				}
-				// Return 204 for OPTIONS (browser will reject if headers missing for disallowed origin)
-				w.WriteHeader(http.StatusNoContent)
+				corsHandleOptions(w, r, origin, allowed, logger, debugMode)
 				return
 			}
-
-			// For actual requests, set CORS headers if origin is allowed
-			if allowed && origin != "" && origin != "null" {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if allowed && origin != "" {
+				setCORSHeaders(w, origin)
 			}
-
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func normalizeCORSOrigin(origin string, logger *zap.Logger, debugMode bool) string {
+	if origin == "" {
+		return ""
+	}
+	if !isValidOrigin(origin) {
+		if debugMode {
+			logger.Debug("cors_invalid_origin_format",
+				zap.String("origin", logpkg.SanitizeString(origin, logpkg.MaxGeneralStringLength)),
+			)
+		}
+		return ""
+	}
+	if origin == "null" {
+		return ""
+	}
+	return origin
+}
+
+func originAllowed(origin string, allowedOrigins []string) bool {
+	if origin == "" {
+		return false
+	}
+	for _, o := range allowedOrigins {
+		if origin == o {
+			return true
+		}
+	}
+	return false
+}
+
+func setCORSHeaders(w http.ResponseWriter, origin string) {
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+}
+
+func corsHandleOptions(w http.ResponseWriter, r *http.Request, origin string, allowed bool, logger *zap.Logger, debugMode bool) {
+	if debugMode {
+		logger.Debug("cors_options_preflight",
+			zap.String("path", logpkg.SanitizePath(r.URL.Path)),
+			zap.Bool("allowed", allowed),
+		)
+	}
+	if allowed && origin != "" {
+		setCORSHeaders(w, origin)
+		w.Header().Set("Access-Control-Max-Age", "86400")
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // CORSFromEnv creates CORS middleware from environment variable

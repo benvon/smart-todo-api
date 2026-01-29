@@ -4,34 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/benvon/smart-todo/internal/request"
 	"github.com/redis/go-redis/v9"
 )
-
-// getClientIPForRateLimit extracts the client IP for rate limiting
-func getClientIPForRateLimit(r *http.Request) string {
-	// Check X-Forwarded-For header (for proxies/load balancers)
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		// X-Forwarded-For can contain multiple IPs (comma-separated)
-		// The first one is typically the original client IP
-		ips := strings.Split(xff, ",")
-		if len(ips) > 0 {
-			return strings.TrimSpace(ips[0])
-		}
-	}
-
-	// Check X-Real-IP header (alternative header used by some proxies)
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" {
-		return strings.TrimSpace(xri)
-	}
-
-	// Fall back to RemoteAddr
-	return r.RemoteAddr
-}
 
 const (
 	// DefaultUnauthenticatedRateLimit is the default rate limit for unauthenticated requests (100 req/min)
@@ -75,6 +52,11 @@ func (r *RedisRateLimiter) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
 
+// Client returns the underlying Redis client for use with other stores (e.g. ulule limiter).
+func (r *RedisRateLimiter) Client() *redis.Client {
+	return r.client
+}
+
 // LimitCounter implements httprate.LimitCounter interface for Redis
 type redisLimitCounter struct {
 	client *redis.Client
@@ -106,16 +88,16 @@ func (c *redisLimitCounter) Increment(ctx context.Context) (int, error) {
 	prevWindowStart := windowStart.Add(-c.window)
 	prevKey := fmt.Sprintf("%s:%d", c.key, prevWindowStart.Unix())
 	prevCount := c.client.Get(ctx, prevKey).Val()
-		if prevCount != "" {
-			// Calculate sliding window count (proportional to remaining time in previous window)
-			elapsed := now.Sub(windowStart)
-			var prevWindowCount int
-			if _, err := fmt.Sscanf(prevCount, "%d", &prevWindowCount); err == nil && prevWindowCount > 0 {
-				// Weight the previous window count by how much time is left
-				remainingRatio := float64(c.window-elapsed) / float64(c.window)
-				count += int(float64(prevWindowCount) * remainingRatio)
-			}
+	if prevCount != "" {
+		// Calculate sliding window count (proportional to remaining time in previous window)
+		elapsed := now.Sub(windowStart)
+		var prevWindowCount int
+		if _, err := fmt.Sscanf(prevCount, "%d", &prevWindowCount); err == nil && prevWindowCount > 0 {
+			// Weight the previous window count by how much time is left
+			remainingRatio := float64(c.window-elapsed) / float64(c.window)
+			count += int(float64(prevWindowCount) * remainingRatio)
 		}
+	}
 
 	return count, nil
 }
@@ -128,7 +110,7 @@ func RateLimit(redisLimiter *RedisRateLimiter, requestsPerMinute int) func(http.
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := getClientIPForRateLimit(r)
+			key := request.ClientIP(r)
 			counter := &redisLimitCounter{
 				client: redisLimiter.client,
 				key:    fmt.Sprintf("ratelimit:%s", key),

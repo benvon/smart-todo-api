@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"time"
 )
 
 // MessageInterface defines the interface for queue messages
@@ -14,25 +15,15 @@ type MessageInterface interface {
 
 // JobQueue is the interface for job queues
 type JobQueue interface {
-	// Enqueue adds a job to the queue
 	Enqueue(ctx context.Context, job *Job) error
-
-	// Dequeue removes and returns a message from the queue
-	// Returns nil if no message is available
-	// The caller is responsible for acknowledging the message
-	// DEPRECATED: Use Consume() for better performance and scalability
 	Dequeue(ctx context.Context) (*Message, error)
-
-	// Consume returns a channel of messages from the queue
-	// Messages are delivered asynchronously as they arrive
-	// The caller is responsible for acknowledging each message
-	// Prefetch controls how many unacknowledged messages each consumer can hold
-	// Returns a channel that will be closed when the context is cancelled or an error occurs
 	Consume(ctx context.Context, prefetchCount int) (<-chan *Message, <-chan error, error)
-
-	// Close closes the queue connection
 	Close() error
-
-	// HealthCheck verifies the queue connection is healthy
 	HealthCheck(ctx context.Context) error
+}
+
+// DLQPurger removes dead-lettered messages older than a retention period.
+// Implementations consume from the DLQ, ack (discard) old messages, and nack without requeue for recent ones so the purge completes.
+type DLQPurger interface {
+	PurgeOlderThan(ctx context.Context, retention time.Duration) (purged int, err error)
 }

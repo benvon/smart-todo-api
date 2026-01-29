@@ -9,9 +9,10 @@ import (
 
 	"github.com/benvon/smart-todo/internal/database"
 	logpkg "github.com/benvon/smart-todo/internal/logger"
-	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/benvon/smart-todo/internal/request"
 	"github.com/benvon/smart-todo/internal/services/ai"
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
 )
@@ -47,45 +48,50 @@ type ChatMessageRequest struct {
 
 // StartChat starts a chat session and returns SSE stream
 func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
 	}
-
-	// Set up SSE headers
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
-
-	// Get or create chat session
+	setSSEHeaders(w)
 	session := h.chatService.GetOrCreateSession(user.ID)
-
-	// Send initial connection message
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", h.formatSSEMessage("connected", map[string]any{
-		"message":    "Chat session started",
-		"session_id": session.UserID.String(),
-	})); err != nil {
+	if err := h.sendSSEConnected(w, session); err != nil {
 		h.logger.Warn("failed_to_write_sse_message",
 			zap.String("error", logpkg.SanitizeError(err)),
 			zap.String("user_id", logpkg.SanitizeUserID(user.ID.String())),
 		)
 		return
 	}
-
-	flusher, ok := w.(http.Flusher)
-	if ok {
+	flusher, _ := w.(http.Flusher)
+	if flusher != nil {
 		flusher.Flush()
 	}
-
-	// Keep connection alive with ping every 30 seconds
 	ctx := r.Context()
-	// Create independent context for cleanup work before request context is cancelled
 	cleanupCtx := context.WithoutCancel(ctx)
+	h.startSSEPingGoroutine(ctx, w, flusher)
+	<-ctx.Done()
+	h.scheduleSummaryUpdate(cleanupCtx, user.ID, session)
+	h.chatService.CloseSession(user.ID)
+}
+
+func setSSEHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+}
+
+func (h *ChatHandler) sendSSEConnected(w http.ResponseWriter, session *ai.ChatSession) error {
+	_, err := fmt.Fprintf(w, "data: %s\n\n", h.formatSSEMessage("connected", map[string]any{
+		"message":    "Chat session started",
+		"session_id": session.UserID.String(),
+	}))
+	return err
+}
+
+func (h *ChatHandler) startSSEPingGoroutine(ctx context.Context, w http.ResponseWriter, flusher http.Flusher) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-
 	go func() {
 		for {
 			select {
@@ -101,39 +107,30 @@ func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
+}
 
-	// Wait for context cancellation (client disconnect)
-	<-ctx.Done()
-
-	// Summarize and save context before closing
-	// Extract data before closing session, then run in background goroutine
-	// with independent context since request context is already cancelled
-	if session.NeedsSummaryUpdate && len(session.Messages) > 0 {
-		userID := user.ID
-		messages := make([]ai.ChatMessage, len(session.Messages))
-		copy(messages, session.Messages)
-
-		go func(ctx context.Context) {
-			updateCtx, updateCancel := context.WithTimeout(ctx, 5*time.Second)
-			defer updateCancel()
-			// Add user_id to context for logging
-			updateCtx = context.WithValue(updateCtx, ai.UserIDContextKey(), userID)
-
-			if err := h.contextService.UpdateContextSummary(updateCtx, userID, messages); err != nil {
-				h.logger.Error("failed_to_save_chat_summary",
-					zap.String("error", logpkg.SanitizeError(err)),
-					zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
-				)
-			}
-		}(cleanupCtx)
+func (h *ChatHandler) scheduleSummaryUpdate(ctx context.Context, userID uuid.UUID, session *ai.ChatSession) {
+	if !session.NeedsSummaryUpdate || len(session.Messages) == 0 {
+		return
 	}
-
-	h.chatService.CloseSession(user.ID)
+	messages := make([]ai.ChatMessage, len(session.Messages))
+	copy(messages, session.Messages)
+	go func(cleanupCtx context.Context) {
+		updateCtx, cancel := context.WithTimeout(cleanupCtx, 5*time.Second)
+		defer cancel()
+		updateCtx = context.WithValue(updateCtx, ai.UserIDContextKey(), userID)
+		if err := h.contextService.UpdateContextSummary(updateCtx, userID, messages); err != nil {
+			h.logger.Error("failed_to_save_chat_summary",
+				zap.String("error", logpkg.SanitizeError(err)),
+				zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+			)
+		}
+	}(ctx)
 }
 
 // SendMessage sends a message in the chat session
 func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return

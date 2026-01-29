@@ -37,69 +37,8 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 	if err != nil {
 		return nil, err
 	}
-
-	// Try to fetch authorization endpoint from OIDC discovery document
-	// Fall back to constructing it from issuer if discovery fails
-	var authEndpoint string
-	discoveryURL := config.Issuer + "/.well-known/openid-configuration"
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(discoveryURL)
-	if err == nil && resp.StatusCode == http.StatusOK {
-		defer func() {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				// Log error but don't fail the request - body already read
-				// Use standard log here since OIDC provider doesn't have logger
-				// This is a minor cleanup error, can be ignored
-				_ = closeErr
-			}
-		}()
-		var discovery struct {
-			AuthorizationEndpoint string `json:"authorization_endpoint"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&discovery); err == nil && discovery.AuthorizationEndpoint != "" {
-			authEndpoint = discovery.AuthorizationEndpoint
-		}
-	}
-
-	// Fallback: construct from issuer if discovery didn't work
-	if authEndpoint == "" {
-		if len(config.Issuer) > 0 && config.Issuer[len(config.Issuer)-1] == '/' {
-			authEndpoint = config.Issuer + "oauth2/authorize"
-		} else {
-			authEndpoint = config.Issuer + "/oauth2/authorize"
-		}
-	}
-
-	var tokenEndpoint string
-	// For Cognito, if a domain is configured, use it for the OAuth2 endpoints
-	// This is required because Cognito OAuth2 flows require domain-based endpoints, not issuer-based ones
-	if config.Domain != nil && *config.Domain != "" && strings.Contains(config.Issuer, "cognito-idp.") {
-		// Use domain to construct OAuth2 endpoints
-		// Domain can be either a custom domain (idp.benvon.net) or Cognito domain format
-		domain := *config.Domain
-		var baseURL string
-		if strings.Contains(domain, ".") && !strings.Contains(domain, "auth.") {
-			// Custom domain - use as-is
-			baseURL = fmt.Sprintf("https://%s", domain)
-		} else {
-			// Assume it's already in the correct format
-			if strings.HasPrefix(domain, "https://") {
-				baseURL = domain
-			} else {
-				baseURL = fmt.Sprintf("https://%s", domain)
-			}
-		}
-		authEndpoint = fmt.Sprintf("%s/oauth2/authorize", baseURL)
-		tokenEndpoint = fmt.Sprintf("%s/oauth2/token", baseURL)
-	} else {
-		// Fallback: construct token endpoint from issuer
-		if len(config.Issuer) > 0 && config.Issuer[len(config.Issuer)-1] == '/' {
-			tokenEndpoint = config.Issuer + "oauth2/token"
-		} else {
-			tokenEndpoint = config.Issuer + "/oauth2/token"
-		}
-	}
-
+	authEndpoint := getAuthEndpoint(config)
+	tokenEndpoint := getTokenEndpoint(config)
 	return &LoginConfig{
 		AuthorizationEndpoint: authEndpoint,
 		TokenEndpoint:         tokenEndpoint,
@@ -107,6 +46,61 @@ func (p *Provider) GetLoginConfig(ctx context.Context, providerName string) (*Lo
 		RedirectURI:           config.RedirectURI,
 		Scope:                 "openid email profile",
 	}, nil
+}
+
+func getAuthEndpoint(config *models.OIDCConfig) string {
+	if config.Domain != nil && *config.Domain != "" && strings.Contains(config.Issuer, "cognito-idp.") {
+		return fmt.Sprintf("%s/oauth2/authorize", cognitoDomainBaseURL(*config.Domain))
+	}
+	if s := fetchAuthEndpointFromDiscovery(config.Issuer); s != "" {
+		return s
+	}
+	return authEndpointFromIssuer(config.Issuer)
+}
+
+func fetchAuthEndpointFromDiscovery(issuer string) string {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(issuer + "/.well-known/openid-configuration")
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var discovery struct {
+		AuthorizationEndpoint string `json:"authorization_endpoint"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&discovery); err != nil || discovery.AuthorizationEndpoint == "" {
+		return ""
+	}
+	return discovery.AuthorizationEndpoint
+}
+
+func authEndpointFromIssuer(issuer string) string {
+	if len(issuer) > 0 && issuer[len(issuer)-1] == '/' {
+		return issuer + "oauth2/authorize"
+	}
+	return issuer + "/oauth2/authorize"
+}
+
+func getTokenEndpoint(config *models.OIDCConfig) string {
+	if config.Domain != nil && *config.Domain != "" && strings.Contains(config.Issuer, "cognito-idp.") {
+		baseURL := cognitoDomainBaseURL(*config.Domain)
+		return fmt.Sprintf("%s/oauth2/token", baseURL)
+	}
+	return tokenEndpointFromIssuer(config.Issuer)
+}
+
+func cognitoDomainBaseURL(domain string) string {
+	if strings.HasPrefix(domain, "https://") {
+		return domain
+	}
+	return fmt.Sprintf("https://%s", domain)
+}
+
+func tokenEndpointFromIssuer(issuer string) string {
+	if len(issuer) > 0 && issuer[len(issuer)-1] == '/' {
+		return issuer + "oauth2/token"
+	}
+	return issuer + "/oauth2/token"
 }
 
 // LoginConfig contains OIDC login configuration for frontend

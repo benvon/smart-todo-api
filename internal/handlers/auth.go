@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/benvon/smart-todo/internal/middleware"
+	"github.com/benvon/smart-todo/internal/request"
 	"github.com/benvon/smart-todo/internal/services/oidc"
 	"github.com/gorilla/mux"
 )
@@ -45,7 +45,7 @@ func (h *AuthHandler) GetOIDCLogin(w http.ResponseWriter, r *http.Request) {
 
 // GetMe returns current user information
 func (h *AuthHandler) GetMe(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
