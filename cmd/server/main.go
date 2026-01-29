@@ -217,11 +217,6 @@ func main() {
 		chatHandler = handlers.NewChatHandler(chatService, contextService, contextRepo, zapLogger)
 	}
 
-	rateLimitMW, err := middleware.RateLimitFromDB(redisLimiter.Client(), ratelimitConfigRepo, "5-S")
-	if err != nil {
-		zapLogger.Fatal("failed_to_create_rate_limit_middleware", zap.Error(err))
-	}
-
 	// Setup router
 	r := mux.NewRouter()
 
@@ -236,6 +231,9 @@ func main() {
 	// 2. CORS (load from DB, hot-reload; fallback to FRONTEND_URL)
 	corsReloader := middleware.NewCORSReloader(corsConfigRepo, cfg.FrontendURL, zapLogger, 1*time.Minute)
 	r.Use(corsReloader.Middleware())
+	// Rate limit (load from DB, hot-reload)
+	rateLimitReloader := middleware.NewRateLimitReloader(redisLimiter.Client(), ratelimitConfigRepo, "5-S", zapLogger, 1*time.Minute)
+	rateLimitMW := rateLimitReloader.Middleware()
 	// 3. Request size limits (protects against DoS)
 	r.Use(middleware.MaxRequestSize(middleware.DefaultMaxRequestSize))
 	// 4. Content-Type validation for POST/PATCH/PUT requests
@@ -319,10 +317,11 @@ func main() {
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
-	// CORS hot-reload loop
-	corsCtx, corsCancel := context.WithCancel(context.Background())
-	defer corsCancel()
-	go corsReloader.Start(corsCtx)
+	// CORS and rate limit hot-reload loops
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	defer reloadCancel()
+	go corsReloader.Start(reloadCtx)
+	go rateLimitReloader.Start(reloadCtx)
 
 	// Start server in a goroutine
 	go func() {
@@ -340,7 +339,7 @@ func main() {
 	<-quit
 
 	zapLogger.Info("server_shutting_down")
-	corsCancel()
+	reloadCancel()
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

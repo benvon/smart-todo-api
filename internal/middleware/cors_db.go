@@ -68,6 +68,12 @@ func (r *CORSReloader) load(ctx context.Context) {
 	var allowCreds bool
 	var maxAge int
 	if err != nil || cfg == nil {
+		if err != nil {
+			r.log.Warn("failed_to_load_cors_config_from_db_using_fallback",
+				zap.Error(err),
+				zap.String("fallback_origin", r.fallback),
+			)
+		}
 		origins = database.AllowedOriginsSlice(r.fallback)
 		allowCreds = true
 		maxAge = 86400
