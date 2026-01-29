@@ -15,9 +15,22 @@ function handleAuthError() {
 }
 
 /**
- * Make an authenticated API request
+ * Ensure config is loaded before making API requests.
+ * Centralizes CONFIG_LOADED so all apiRequest callers get config automatically.
+ */
+async function ensureConfig() {
+    if (window.CONFIG_LOADED) {
+        await window.CONFIG_LOADED;
+    }
+}
+
+/**
+ * Make an authenticated API request.
+ * Awaits config load before running; supports optional timeout (ms) for profile fetches.
  */
 async function apiRequest(endpoint, options = {}) {
+    await ensureConfig();
+
     const token = getToken();
     if (!token) {
         handleAuthError();
@@ -40,21 +53,22 @@ async function apiRequest(endpoint, options = {}) {
         configError.isConfigError = true;
         throw configError;
     }
-    
+
     const url = `${window.API_BASE_URL}${endpoint}`;
     const headers = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         ...options.headers
     };
-    
+
+    const fetchOptions = { ...options, headers };
+    if (typeof options.timeout === 'number') {
+        fetchOptions.signal = AbortSignal.timeout(options.timeout);
+    }
 
     let response;
     try {
-        response = await fetch(url, {
-            ...options,
-            headers
-        });
+        response = await fetch(url, fetchOptions);
     } catch (error) {
         // Log the actual error for debugging
         // eslint-disable-next-line no-console
@@ -179,10 +193,7 @@ async function apiRequest(endpoint, options = {}) {
  * Get OIDC login configuration
  */
 async function getOIDCLoginConfig() {
-    // Wait for config to load before making API call
-    if (window.CONFIG_LOADED) {
-        await window.CONFIG_LOADED;
-    }
+    await ensureConfig();
     const url = `${window.API_BASE_URL}/api/v1/auth/oidc/login`;
     try {
         const response = await fetch(url);
@@ -225,10 +236,11 @@ async function getOIDCLoginConfig() {
 }
 
 /**
- * Get current user
+ * Get current user.
+ * Optional options.timeout (ms) for profile fetches to avoid hanging (e.g. 10000).
  */
-async function getCurrentUser() {
-    return apiRequest('/api/v1/auth/me');
+async function getCurrentUser(options = {}) {
+    return apiRequest('/api/v1/auth/me', options);
 }
 
 /**
@@ -317,10 +329,7 @@ async function sendChatMessage(message) {
  * Check API health status
  */
 async function checkAPIHealth() {
-    // Wait for config to load before making API call
-    if (window.CONFIG_LOADED) {
-        await window.CONFIG_LOADED;
-    }
+    await ensureConfig();
     try {
         const url = `${window.API_BASE_URL}/healthz`;
         const response = await fetch(url, {
@@ -341,10 +350,7 @@ async function checkAPIHealth() {
  * Check extended API health status
  */
 async function checkExtendedAPIHealth() {
-    // Wait for config to load before making API call
-    if (window.CONFIG_LOADED) {
-        await window.CONFIG_LOADED;
-    }
+    await ensureConfig();
     try {
         const url = `${window.API_BASE_URL}/healthz?mode=extended`;
         const response = await fetch(url, {
@@ -362,25 +368,17 @@ async function checkExtendedAPIHealth() {
 }
 
 /**
- * Get AI context for current user
+ * Get AI context for current user.
+ * Optional options.timeout (ms) for profile fetches (e.g. 10000).
  */
-async function getAIContext() {
-    // Wait for config to load before making API call (same pattern as other functions)
-    if (window.CONFIG_LOADED) {
-        await window.CONFIG_LOADED;
-    }
-    return apiRequest('/api/v1/ai/context');
+async function getAIContext(options = {}) {
+    return apiRequest('/api/v1/ai/context', options);
 }
 
 /**
  * Update AI context for current user
  */
 async function updateAIContext(contextSummary, preferences = null) {
-    // Wait for config to load before making API call (same as other functions)
-    if (window.CONFIG_LOADED) {
-        await window.CONFIG_LOADED;
-    }
-    
     const payload = {};
     // Include context_summary if provided (including empty string)
     // Empty string is a valid value, so we include it
@@ -406,14 +404,15 @@ async function updateAIContext(contextSummary, preferences = null) {
 }
 
 /**
- * Get tag statistics for current user
+ * Get tag statistics for current user.
+ * Optional options.timeout (ms) for profile fetches (e.g. 10000).
  */
-async function getTagStats() {
-    return apiRequest('/api/v1/todos/tags/stats');
+async function getTagStats(options = {}) {
+    return apiRequest('/api/v1/todos/tags/stats', options);
 }
 
-// Export functions for ES module use
 export {
+    ensureConfig,
     handleAuthError,
     apiRequest,
     getOIDCLoginConfig,
@@ -431,23 +430,3 @@ export {
     updateAIContext,
     getTagStats
 };
-
-// Expose functions globally for backward compatibility
-if (typeof window !== 'undefined') {
-    window.handleAuthError = handleAuthError;
-    window.apiRequest = apiRequest;
-    window.getOIDCLoginConfig = getOIDCLoginConfig;
-    window.getCurrentUser = getCurrentUser;
-    window.getTodos = getTodos;
-    window.createTodo = createTodo;
-    window.updateTodo = updateTodo;
-    window.deleteTodo = deleteTodo;
-    window.completeTodo = completeTodo;
-    window.analyzeTodo = analyzeTodo;
-    window.sendChatMessage = sendChatMessage;
-    window.checkAPIHealth = checkAPIHealth;
-    window.checkExtendedAPIHealth = checkExtendedAPIHealth;
-    window.getAIContext = getAIContext;
-    window.updateAIContext = updateAIContext;
-    window.getTagStats = getTagStats;
-}

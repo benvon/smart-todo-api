@@ -1,10 +1,9 @@
 // Chat functionality
 
 import { sendChatMessage, getAIContext, updateAIContext } from './api.js';
+import { getContext, setContext } from './context.js';
 import logger from './logger.js';
 import { showError } from './error-utils.js';
-
-let currentContext = '';
 
 /**
  * Initialize chat interface
@@ -55,22 +54,18 @@ async function loadContext() {
     try {
         const response = await getAIContext();
         // Validate response structure and data types
-        if (response && typeof response === 'object' && 
+        if (response && typeof response === 'object' &&
             response.data && typeof response.data === 'object') {
-            // Ensure context_summary is a string before updating currentContext
             const contextSummary = response.data.context_summary;
             if (typeof contextSummary === 'string') {
-                currentContext = contextSummary;
+                setContext(contextSummary);
             } else if (contextSummary === null || contextSummary === undefined) {
-                // API returned null/undefined - treat as empty context
-                currentContext = '';
+                setContext('');
             } else {
-                // Unexpected type - log warning and preserve current context
                 logger.warn('Unexpected context_summary type:', typeof contextSummary);
             }
         } else {
-            // Invalid response structure - clear context
-            currentContext = '';
+            setContext('');
         }
     } catch (error) {
         logger.error('Failed to load context:', error);
@@ -89,24 +84,21 @@ async function handleLoadContext() {
     try {
         const response = await getAIContext();
         // Validate response structure and data types
-        if (response && typeof response === 'object' && 
+        if (response && typeof response === 'object' &&
             response.data && typeof response.data === 'object') {
             const contextSummary = response.data.context_summary;
             if (typeof contextSummary === 'string') {
-                currentContext = contextSummary;
-                chatInput.value = currentContext;
+                setContext(contextSummary);
+                chatInput.value = contextSummary;
                 chatInput.focus();
             } else if (contextSummary === null || contextSummary === undefined) {
-                // API returned null/undefined - treat as empty context
-                currentContext = '';
+                setContext('');
                 chatInput.value = '';
             } else {
-                // Unexpected type - log warning, preserve current context, and clear input
                 logger.warn('Unexpected context_summary type:', typeof contextSummary);
                 chatInput.value = '';
             }
         } else {
-            // Invalid response structure - clear input
             chatInput.value = '';
         }
     } catch (error) {
@@ -137,7 +129,7 @@ async function handleSaveContext() {
     
     try {
         await updateAIContext(contextText);
-        currentContext = contextText;
+        setContext(contextText);
         saveButton.textContent = 'Saved!';
         setTimeout(() => {
             saveButton.textContent = originalText;
@@ -157,12 +149,10 @@ async function handleSaveContext() {
  * Append AI response to context
  */
 async function appendToContext(text) {
-    const newContext = currentContext 
-        ? `${currentContext}\n\n${text}`
-        : text;
-    
+    const prev = getContext();
+    const newContext = prev ? `${prev}\n\n${text}` : text;
     await updateAIContext(newContext);
-    currentContext = newContext;
+    setContext(newContext);
 }
 
 /**
