@@ -56,33 +56,29 @@ func SanitizeString(s string, maxLength int) string {
 	if s == "" {
 		return ""
 	}
-
 	if maxLength <= 0 {
 		maxLength = MaxGeneralStringLength
 	}
+	s = sanitizeFilterRunes(s)
+	if len(s) > maxLength {
+		s = s[:maxLength] + "..."
+	}
+	return s
+}
 
-	// Validate and fix UTF-8 encoding
+// sanitizeFilterRunes validates UTF-8 and removes control characters (keeps printable, space, tab, newline, CR).
+func sanitizeFilterRunes(s string) string {
 	if !utf8.ValidString(s) {
 		s = strings.ToValidUTF8(s, "")
 	}
-
-	// Remove control characters (except space, tab, newline, carriage return)
 	var builder strings.Builder
 	builder.Grow(len(s))
 	for _, r := range s {
-		// Allow printable characters, space, tab, newline, carriage return
 		if unicode.IsPrint(r) || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
 			builder.WriteRune(r)
 		}
 	}
-	s = builder.String()
-
-	// Truncate to max length
-	if len(s) > maxLength {
-		s = s[:maxLength] + "..."
-	}
-
-	return s
+	return builder.String()
 }
 
 // SanitizeError sanitizes an error message for safe logging

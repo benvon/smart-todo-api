@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 )
 
 // Verifier verifies JWT tokens
@@ -29,76 +29,62 @@ const (
 
 // Verify verifies a JWT token and extracts claims
 func (v *Verifier) Verify(ctx context.Context, tokenString string, jwksURL string) (*models.JWTClaims, error) {
-	// Validate token length to prevent DoS attacks
 	if len(tokenString) > MaxTokenSize {
 		return nil, fmt.Errorf("token exceeds maximum size of %d bytes", MaxTokenSize)
 	}
-
-	// Get JWKS
 	keys, err := v.jwksManager.GetJWKS(ctx, jwksURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get JWKS: %w", err)
 	}
-
-	// Parse and verify token signature (with basic validations: exp, iat, nbf)
 	token, err := jwt.Parse([]byte(tokenString), jwt.WithKeySet(keys), jwt.WithValidate(true))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse/verify token: %w", err)
 	}
-
-	// Validate issuer using library's built-in validation
 	if err := jwt.Validate(token, jwt.WithIssuer(v.issuer)); err != nil {
 		return nil, fmt.Errorf("token issuer validation failed: %w", err)
 	}
+	return extractJWTClaims(token), nil
+}
 
-	// Extract claims
+// extractJWTClaims copies standard claims from the token into a JWTClaims struct.
+func extractJWTClaims(token jwt.Token) *models.JWTClaims {
 	claims := &models.JWTClaims{}
+	setStringClaim(token, "sub", &claims.Sub)
+	setStringClaim(token, "email", &claims.Email)
+	setStringClaim(token, "name", &claims.Name)
+	setStringClaim(token, "iss", &claims.Iss)
+	setInt64Claim(token, "exp", &claims.Exp)
+	setInt64Claim(token, "iat", &claims.Iat)
+	setAudClaim(token, &claims.Aud)
+	return claims
+}
 
-	if sub, ok := token.Get("sub"); ok {
-		if subStr, ok := sub.(string); ok {
-			claims.Sub = subStr
+func setStringClaim(token jwt.Token, key string, out *string) {
+	if v, ok := token.Get(key); ok {
+		if s, ok := v.(string); ok {
+			*out = s
 		}
 	}
+}
 
-	if email, ok := token.Get("email"); ok {
-		if emailStr, ok := email.(string); ok {
-			claims.Email = emailStr
+func setInt64Claim(token jwt.Token, key string, out *int64) {
+	if v, ok := token.Get(key); ok {
+		if f, ok := v.(float64); ok {
+			*out = int64(f)
 		}
 	}
+}
 
-	if name, ok := token.Get("name"); ok {
-		if nameStr, ok := name.(string); ok {
-			claims.Name = nameStr
+func setAudClaim(token jwt.Token, out *string) {
+	if v, ok := token.Get("aud"); ok {
+		if s, ok := v.(string); ok {
+			*out = s
+			return
 		}
-	}
-
-	if exp, ok := token.Get("exp"); ok {
-		if expFloat, ok := exp.(float64); ok {
-			claims.Exp = int64(expFloat)
-		}
-	}
-
-	if iat, ok := token.Get("iat"); ok {
-		if iatFloat, ok := iat.(float64); ok {
-			claims.Iat = int64(iatFloat)
-		}
-	}
-
-	if iss, ok := token.Get("iss"); ok {
-		if issStr, ok := iss.(string); ok {
-			claims.Iss = issStr
-		}
-	}
-
-	if aud, ok := token.Get("aud"); ok {
-		if audStr, ok := aud.(string); ok {
-			claims.Aud = audStr
-		} else if audArr, ok := aud.([]any); ok && len(audArr) > 0 {
-			if audStr, ok := audArr[0].(string); ok {
-				claims.Aud = audStr
+		if arr, ok := v.([]any); ok && len(arr) > 0 {
+			if s, ok := arr[0].(string); ok {
+				*out = s
 			}
 		}
 	}
-
-	return claims, nil
 }

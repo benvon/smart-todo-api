@@ -149,154 +149,144 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	if job.TodoID == nil {
 		return fmt.Errorf("todo_id is required for task analysis job")
 	}
-
-	// Load todo
 	todo, err := a.todoRepo.GetByID(ctx, *job.TodoID)
 	if err != nil {
 		return fmt.Errorf("failed to get todo: %w", err)
 	}
-
-	// Save original tags for tag change detection
 	originalTags := todo.Metadata.CategoryTags
-
-	// Verify todo belongs to user
 	if todo.UserID != job.UserID {
 		return fmt.Errorf("todo does not belong to user")
 	}
-
-	// Load user context
-	var userContext *models.AIContext
-	aiContext, err := a.contextRepo.GetByUserID(ctx, job.UserID)
-	if err == nil {
-		userContext = aiContext
-	}
-
-	// Load tag statistics to guide AI tag selection
-	var tagStats *models.TagStatistics
-	stats, err := a.getTagStatistics(ctx, job.UserID)
-	if err == nil && stats != nil {
-		tagStats = stats
-	}
-
-	// Check if user has reprocessing paused
-	activity, err := a.activityRepo.GetByUserID(ctx, job.UserID)
-	if err == nil && activity != nil && activity.ReprocessingPaused {
-		a.logger.Debug("skipping_analysis_reprocessing_paused",
-			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
-		)
+	userContext, _ := a.contextRepo.GetByUserID(ctx, job.UserID)
+	tagStats, _ := a.getTagStatistics(ctx, job.UserID)
+	if a.shouldSkipAnalysisForPausedUser(ctx, job.UserID) {
 		return nil
 	}
-
-	// Set status to processing before starting analysis
-	// Only update if currently pending (don't override completed status)
-	if todo.Status == models.TodoStatusPending {
-		todo.Status = models.TodoStatusProcessing
-		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
-			a.logger.Warn("failed_to_update_todo_status_to_processing",
-				zap.String("operation", "process_task_analysis_job"),
-				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
-				zap.String("error", logpkg.SanitizeError(err)),
-			)
-			// Continue with analysis even if status update fails
-		} else {
-			a.logger.Debug("set_todo_status_to_processing",
-				zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
-			)
-		}
-	}
-
+	a.setTodoProcessingIfPending(ctx, todo, originalTags)
 	tags, timeHorizon, err := a.analyzeTodoWithProvider(ctx, job, todo, userContext, tagStats)
 	if err != nil {
-		// On error, set status back to pending so it can be retried
-		if todo.Status == models.TodoStatusProcessing {
-			todo.Status = models.TodoStatusPending
-			if updateErr := a.todoRepo.Update(ctx, todo, originalTags); updateErr != nil {
-				a.logger.Warn("failed_to_reset_todo_status_to_pending",
-					zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
-					zap.String("error", logpkg.SanitizeError(updateErr)),
-				)
-			}
-		}
+		a.resetTodoToPendingOnError(ctx, todo, originalTags)
 		return fmt.Errorf("failed to analyze task: %w", err)
 	}
-
-	// Get existing user-defined tags (preserve them)
-	existingUserTags := todo.Metadata.GetUserTags()
-
-	// Merge AI tags with user tags (user tags override)
-	todo.Metadata.MergeTags(tags, existingUserTags)
-
-	// Update time horizon only if user hasn't manually set it
-	// Check if user has manually overridden the time horizon
-	if todo.Metadata.TimeHorizonUserOverride == nil || !*todo.Metadata.TimeHorizonUserOverride {
-		todo.TimeHorizon = timeHorizon
-	}
-	// If TimeHorizonUserOverride is true, preserve the existing time_horizon
-
-	// Set status to processed after successful analysis (unless it's completed)
-	if todo.Status == models.TodoStatusProcessing {
-		todo.Status = models.TodoStatusProcessed
-	}
-
-	// Update todo (tag change detection is handled automatically by the repository)
+	a.applyAnalysisResultToTodo(todo, tags, timeHorizon)
 	if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
+	a.logAnalyzedTodo(todo, tags, timeHorizon, job.UserID)
+	return nil
+}
 
+func (a *TaskAnalyzer) shouldSkipAnalysisForPausedUser(ctx context.Context, userID uuid.UUID) bool {
+	activity, err := a.activityRepo.GetByUserID(ctx, userID)
+	if err != nil || activity == nil || !activity.ReprocessingPaused {
+		return false
+	}
+	a.logger.Debug("skipping_analysis_reprocessing_paused",
+		zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+	)
+	return true
+}
+
+func (a *TaskAnalyzer) setTodoProcessingIfPending(ctx context.Context, todo *models.Todo, originalTags []string) {
+	if todo.Status != models.TodoStatusPending {
+		return
+	}
+	todo.Status = models.TodoStatusProcessing
+	if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
+		a.logger.Warn("failed_to_update_todo_status_to_processing",
+			zap.String("operation", "process_task_analysis_job"),
+			zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+			zap.String("error", logpkg.SanitizeError(err)),
+		)
+		return
+	}
+	a.logger.Debug("set_todo_status_to_processing",
+		zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+	)
+}
+
+func (a *TaskAnalyzer) resetTodoToPendingOnError(ctx context.Context, todo *models.Todo, originalTags []string) {
+	if todo.Status != models.TodoStatusProcessing {
+		return
+	}
+	todo.Status = models.TodoStatusPending
+	if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
+		a.logger.Warn("failed_to_reset_todo_status_to_pending",
+			zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
+			zap.String("error", logpkg.SanitizeError(err)),
+		)
+	}
+}
+
+func (a *TaskAnalyzer) applyAnalysisResultToTodo(todo *models.Todo, tags []string, timeHorizon models.TimeHorizon) {
+	existingUserTags := todo.Metadata.GetUserTags()
+	todo.Metadata.MergeTags(tags, existingUserTags)
+	if todo.Metadata.TimeHorizonUserOverride == nil || !*todo.Metadata.TimeHorizonUserOverride {
+		todo.TimeHorizon = timeHorizon
+	}
+	if todo.Status == models.TodoStatusProcessing {
+		todo.Status = models.TodoStatusProcessed
+	}
+}
+
+func (a *TaskAnalyzer) logAnalyzedTodo(todo *models.Todo, tags []string, timeHorizon models.TimeHorizon, userID uuid.UUID) {
 	a.logger.Info("analyzed_todo",
 		zap.String("todo_id", logpkg.SanitizeUserID(todo.ID.String())),
 		zap.Strings("tags", tags),
 		zap.String("time_horizon", string(timeHorizon)),
 		zap.String("status", string(todo.Status)),
+		zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+	)
+}
+
+// ProcessReprocessUserJob processes a reprocess user job
+func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.Job) error {
+	if a.shouldSkipReprocessingForPausedUser(ctx, job.UserID) {
+		return nil
+	}
+	todos, _, err := a.todoRepo.GetByUserIDPaginated(ctx, job.UserID, nil, nil, 1, 500)
+	if err != nil {
+		return fmt.Errorf("failed to get todos: %w", err)
+	}
+	todosToProcess := filterPendingOrProcessingTodos(todos)
+	userContext, _ := a.contextRepo.GetByUserID(ctx, job.UserID)
+	updated := a.reprocessTodos(ctx, job, todosToProcess, userContext)
+	a.logger.Info("reprocessed_todos",
+		zap.Int("todos_processed", len(todosToProcess)),
+		zap.Int("time_horizons_updated", updated),
 		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 	)
 	return nil
 }
 
-// ProcessReprocessUserJob processes a reprocess user job
-func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.Job) error {
-	// Check if user has reprocessing paused
-	activity, err := a.activityRepo.GetByUserID(ctx, job.UserID)
-	if err == nil && activity != nil && activity.ReprocessingPaused {
-		a.logger.Debug("skipping_reprocessing_paused",
-			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
-		)
-		return nil
+func (a *TaskAnalyzer) shouldSkipReprocessingForPausedUser(ctx context.Context, userID uuid.UUID) bool {
+	activity, err := a.activityRepo.GetByUserID(ctx, userID)
+	if err != nil || activity == nil || !activity.ReprocessingPaused {
+		return false
 	}
+	a.logger.Debug("skipping_reprocessing_paused",
+		zap.String("user_id", logpkg.SanitizeUserID(userID.String())),
+	)
+	return true
+}
 
-	// Get all pending/processing todos for user
-	todos, _, err := a.todoRepo.GetByUserIDPaginated(ctx, job.UserID, nil, nil, 1, 500)
-	if err != nil {
-		return fmt.Errorf("failed to get todos: %w", err)
-	}
-
-	// Filter to pending/processing todos only (exclude processed and completed)
-	var todosToProcess []*models.Todo
-	for _, todo := range todos {
-		if todo.Status == models.TodoStatusPending || todo.Status == models.TodoStatusProcessing {
-			todosToProcess = append(todosToProcess, todo)
+func filterPendingOrProcessingTodos(todos []*models.Todo) []*models.Todo {
+	var out []*models.Todo
+	for _, t := range todos {
+		if t.Status == models.TodoStatusPending || t.Status == models.TodoStatusProcessing {
+			out = append(out, t)
 		}
 	}
+	return out
+}
 
-	// Load user context
-	var userContext *models.AIContext
-	aiContext, err := a.contextRepo.GetByUserID(ctx, job.UserID)
-	if err == nil {
-		userContext = aiContext
-	}
-
-	// Re-analyze each todo
+func (a *TaskAnalyzer) reprocessTodos(ctx context.Context, job *queue.Job, todos []*models.Todo, userContext *models.AIContext) int {
+	tagStats, _ := a.getTagStatistics(ctx, job.UserID)
 	updated := 0
-	for _, todo := range todosToProcess {
+	for _, todo := range todos {
 		originalTags := todo.Metadata.CategoryTags
 		existingUserTags := todo.Metadata.GetUserTags()
 		originalTimeHorizon := todo.TimeHorizon
-
-		var tagStats *models.TagStatistics
-		if stats, stErr := a.getTagStatistics(ctx, job.UserID); stErr == nil && stats != nil {
-			tagStats = stats
-		}
-
 		tags, timeHorizon, err := a.analyzeTodoWithProvider(ctx, job, todo, userContext, tagStats)
 		if err != nil {
 			a.logger.Error("failed_to_analyze_todo",
@@ -307,21 +297,11 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 			)
 			continue
 		}
-
-		// Merge AI tags with user tags
 		todo.Metadata.MergeTags(tags, existingUserTags)
-
-		// Update time horizon only if user hasn't manually set it
-		// Check if user has manually overridden the time horizon
-		if todo.Metadata.TimeHorizonUserOverride == nil || !*todo.Metadata.TimeHorizonUserOverride {
-			if timeHorizon != originalTimeHorizon {
-				todo.TimeHorizon = timeHorizon
-				updated++
-			}
+		if (todo.Metadata.TimeHorizonUserOverride == nil || !*todo.Metadata.TimeHorizonUserOverride) && timeHorizon != originalTimeHorizon {
+			todo.TimeHorizon = timeHorizon
+			updated++
 		}
-		// If TimeHorizonUserOverride is true, preserve the existing time_horizon
-
-		// Update todo (tag change detection is handled automatically by the repository)
 		if err := a.todoRepo.Update(ctx, todo, originalTags); err != nil {
 			a.logger.Error("failed_to_update_todo",
 				zap.String("operation", "reprocess_user_job"),
@@ -329,16 +309,9 @@ func (a *TaskAnalyzer) ProcessReprocessUserJob(ctx context.Context, job *queue.J
 				zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
 				zap.String("error", logpkg.SanitizeError(err)),
 			)
-			continue
 		}
 	}
-
-	a.logger.Info("reprocessed_todos",
-		zap.Int("todos_processed", len(todosToProcess)),
-		zap.Int("time_horizons_updated", updated),
-		zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
-	)
-	return nil
+	return updated
 }
 
 // ProcessJob processes a job based on its type using the processor registry.

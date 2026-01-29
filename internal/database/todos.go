@@ -148,35 +148,13 @@ func (r *TodoRepository) GetByUserID(ctx context.Context, userID uuid.UUID, time
 
 // GetByUserIDPaginated retrieves todos for a user with pagination support
 func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error) {
-	// Build base query for counting
-	countQuery := `SELECT COUNT(*) FROM todos WHERE user_id = $1`
-	countArgs := []any{userID}
-	argIndex := 2
+	whereClause, countQuery, countArgs, argIndex := buildTodoListWhereClause(userID, timeHorizon, status)
 
-	// Build WHERE clause for filtering
-	whereClause := "WHERE user_id = $1"
-	if timeHorizon != nil {
-		whereClause += fmt.Sprintf(" AND time_horizon = $%d", argIndex)
-		countQuery += fmt.Sprintf(" AND time_horizon = $%d", argIndex)
-		countArgs = append(countArgs, string(*timeHorizon))
-		argIndex++
-	}
-
-	if status != nil {
-		whereClause += fmt.Sprintf(" AND status = $%d", argIndex)
-		countQuery += fmt.Sprintf(" AND status = $%d", argIndex)
-		countArgs = append(countArgs, string(*status))
-		argIndex++
-	}
-
-	// Get total count
 	var total int
-	err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total)
-	if err != nil {
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count todos: %w", err)
 	}
 
-	// Build main query with pagination
 	query := fmt.Sprintf(`
 		SELECT id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at, completed_at
 		FROM todos
@@ -184,91 +162,105 @@ func (r *TodoRepository) GetByUserIDPaginated(ctx context.Context, userID uuid.U
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d
 	`, whereClause, argIndex, argIndex+1)
-
-	args := countArgs
-	offset := (page - 1) * pageSize
-	args = append(args, pageSize, offset)
+	args := append(append([]any(nil), countArgs...), pageSize, (page-1)*pageSize)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query todos: %w", err)
 	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			// Log error but continue - rows may already be closed
-			// This is in database layer, logging would require passing logger
-			// The error is non-critical as rows are already processed
-			_ = err // Explicitly ignore error to satisfy linter
-		}
-	}()
+	defer func() { _ = rows.Close() }()
 
+	todos, err := scanTodoRows(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return todos, total, nil
+}
+
+// buildTodoListWhereClause builds WHERE clause and count query for todo list filtering.
+func buildTodoListWhereClause(userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus) (whereClause, countQuery string, args []any, nextArgIndex int) {
+	whereClause = "WHERE user_id = $1"
+	countQuery = "SELECT COUNT(*) FROM todos WHERE user_id = $1"
+	args = []any{userID}
+	nextArgIndex = 2
+	if timeHorizon != nil {
+		whereClause += fmt.Sprintf(" AND time_horizon = $%d", nextArgIndex)
+		countQuery += fmt.Sprintf(" AND time_horizon = $%d", nextArgIndex)
+		args = append(args, string(*timeHorizon))
+		nextArgIndex++
+	}
+	if status != nil {
+		whereClause += fmt.Sprintf(" AND status = $%d", nextArgIndex)
+		countQuery += fmt.Sprintf(" AND status = $%d", nextArgIndex)
+		args = append(args, string(*status))
+		nextArgIndex++
+	}
+	return whereClause, countQuery, args, nextArgIndex
+}
+
+// scanTodoRows scans all rows into todos. Caller must close rows.
+func scanTodoRows(rows *sql.Rows) ([]*models.Todo, error) {
 	var todos []*models.Todo
 	for rows.Next() {
-		todo := &models.Todo{}
-		var metadataJSON []byte
-		var completedAt sql.NullTime
-		var dueDate sql.NullTime
-
-		err := rows.Scan(
-			&todo.ID,
-			&todo.UserID,
-			&todo.Text,
-			&todo.TimeHorizon,
-			&todo.Status,
-			&metadataJSON,
-			&dueDate,
-			&todo.CreatedAt,
-			&todo.UpdatedAt,
-			&completedAt,
-		)
+		todo, err := scanTodoRow(rows)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to scan todo: %w", err)
+			return nil, err
 		}
-
-		if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
-			return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
-		}
-
-		// Initialize TagSources if nil
-		if todo.Metadata.TagSources == nil {
-			todo.Metadata.TagSources = make(map[string]models.TagSource)
-		}
-
-		if dueDate.Valid {
-			todo.DueDate = &dueDate.Time
-		}
-
-		if completedAt.Valid {
-			todo.CompletedAt = &completedAt.Time
-		}
-
 		todos = append(todos, todo)
 	}
-
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error iterating todos: %w", err)
+		return nil, fmt.Errorf("error iterating todos: %w", err)
 	}
+	return todos, nil
+}
 
-	return todos, total, nil
+// scanTodoRow scans the current row into a Todo.
+func scanTodoRow(rows *sql.Rows) (*models.Todo, error) {
+	todo := &models.Todo{}
+	var metadataJSON []byte
+	var completedAt sql.NullTime
+	var dueDate sql.NullTime
+	if err := rows.Scan(
+		&todo.ID,
+		&todo.UserID,
+		&todo.Text,
+		&todo.TimeHorizon,
+		&todo.Status,
+		&metadataJSON,
+		&dueDate,
+		&todo.CreatedAt,
+		&todo.UpdatedAt,
+		&completedAt,
+	); err != nil {
+		return nil, fmt.Errorf("failed to scan todo: %w", err)
+	}
+	if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+	if todo.Metadata.TagSources == nil {
+		todo.Metadata.TagSources = make(map[string]models.TagSource)
+	}
+	if dueDate.Valid {
+		todo.DueDate = &dueDate.Time
+	}
+	if completedAt.Valid {
+		todo.CompletedAt = &completedAt.Time
+	}
+	return todo, nil
 }
 
 // Update updates an existing todo
 // oldTags should be the CategoryTags from the existing todo before the update (pass nil to skip tag change detection)
 func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags []string) error {
-	// Detect tag changes if tag statistics support is enabled
-	var tagsChanged bool
-	if r.tagStatsRepo != nil && oldTags != nil {
-		// Compare tags using tagsEqual which handles nil normalization
-		tagsChanged = !tagsEqual(oldTags, todo.Metadata.CategoryTags)
-		if tagsChanged && r.logger != nil {
-			r.logger.Debug("tag_change_detected",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", todo.UserID.String()),
-				zap.Strings("old_tags", oldTags),
-				zap.Strings("new_tags", todo.Metadata.CategoryTags),
-			)
-		}
+	tagsChanged := r.detectAndLogTagChange(todo, oldTags)
+
+	metadataJSON, err := json.Marshal(todo.Metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
+	dueDate := todoDueDateNullTime(todo.DueDate)
+	completedAt := todoCompletedAtNullTime(todo.CompletedAt)
+	now := time.Now()
 
 	query := `
 		UPDATE todos
@@ -276,34 +268,10 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags 
 		WHERE id = $1
 		RETURNING updated_at
 	`
-
-	metadataJSON, err := json.Marshal(todo.Metadata)
-	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	var dueDate sql.NullTime
-	if todo.DueDate != nil {
-		dueDate = sql.NullTime{Time: *todo.DueDate, Valid: true}
-	}
-
-	var completedAt sql.NullTime
-	if todo.CompletedAt != nil {
-		completedAt = sql.NullTime{Time: *todo.CompletedAt, Valid: true}
-	}
-
-	now := time.Now()
 	err = r.db.QueryRowContext(ctx, query,
-		todo.ID,
-		todo.Text,
-		todo.TimeHorizon,
-		todo.Status,
-		metadataJSON,
-		dueDate,
-		now,
-		completedAt,
+		todo.ID, todo.Text, todo.TimeHorizon, todo.Status,
+		metadataJSON, dueDate, now, completedAt,
 	).Scan(&todo.UpdatedAt)
-
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("todo not found")
 	}
@@ -311,82 +279,102 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags 
 		return fmt.Errorf("failed to update todo: %w", err)
 	}
 
-	// If tags changed, invoke the tag change handler
-	if tagsChanged && r.tagChangeHandler != nil {
-		if r.logger != nil {
-			r.logger.Debug("invoking_tag_change_handler",
-				zap.String("todo_id", todo.ID.String()),
-				zap.String("user_id", todo.UserID.String()),
-			)
-		}
-		if err := r.tagChangeHandler(ctx, todo.UserID); err != nil {
-			// Log error but don't fail the update
-			// Tag analysis can happen later
-			if r.logger != nil {
-				r.logger.Warn("tag_change_handler_failed",
-					zap.String("user_id", todo.UserID.String()),
-					zap.String("todo_id", todo.ID.String()),
-					zap.Error(err),
-				)
-			}
-		} else if r.logger != nil {
-			r.logger.Debug("tag_change_handler_completed",
-				zap.String("user_id", todo.UserID.String()),
-				zap.String("todo_id", todo.ID.String()),
-			)
-		}
-	}
-
+	r.invokeTagChangeHandlerIfNeeded(ctx, todo, tagsChanged)
 	return nil
+}
+
+func (r *TodoRepository) detectAndLogTagChange(todo *models.Todo, oldTags []string) bool {
+	if r.tagStatsRepo == nil || oldTags == nil {
+		return false
+	}
+	changed := !tagsEqual(oldTags, todo.Metadata.CategoryTags)
+	if changed && r.logger != nil {
+		r.logger.Debug("tag_change_detected",
+			zap.String("todo_id", todo.ID.String()),
+			zap.String("user_id", todo.UserID.String()),
+			zap.Strings("old_tags", oldTags),
+			zap.Strings("new_tags", todo.Metadata.CategoryTags),
+		)
+	}
+	return changed
+}
+
+func todoDueDateNullTime(d *time.Time) sql.NullTime {
+	if d == nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: *d, Valid: true}
+}
+
+func todoCompletedAtNullTime(t *time.Time) sql.NullTime {
+	if t == nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: *t, Valid: true}
+}
+
+func (r *TodoRepository) invokeTagChangeHandlerIfNeeded(ctx context.Context, todo *models.Todo, tagsChanged bool) {
+	if !tagsChanged || r.tagChangeHandler == nil {
+		return
+	}
+	if r.logger != nil {
+		r.logger.Debug("invoking_tag_change_handler",
+			zap.String("todo_id", todo.ID.String()),
+			zap.String("user_id", todo.UserID.String()),
+		)
+	}
+	if err := r.tagChangeHandler(ctx, todo.UserID); err != nil {
+		if r.logger != nil {
+			r.logger.Warn("tag_change_handler_failed",
+				zap.String("user_id", todo.UserID.String()),
+				zap.String("todo_id", todo.ID.String()),
+				zap.Error(err),
+			)
+		}
+		return
+	}
+	if r.logger != nil {
+		r.logger.Debug("tag_change_handler_completed",
+			zap.String("user_id", todo.UserID.String()),
+			zap.String("todo_id", todo.ID.String()),
+		)
+	}
 }
 
 // tagsEqual compares two tag slices for equality (order-independent)
 // Handles nil slices as empty slices
 func tagsEqual(a, b []string) bool {
-	// Normalize nil to empty slice
 	if a == nil {
 		a = []string{}
 	}
 	if b == nil {
 		b = []string{}
 	}
-
 	if len(a) != len(b) {
 		return false
 	}
-
-	// Both empty - equal
 	if len(a) == 0 {
 		return true
 	}
+	return tagCountsEqual(tagCounts(a), tagCounts(b))
+}
 
-	// Create maps for O(n) comparison
-	mapA := make(map[string]int)
-	mapB := make(map[string]int)
-
-	// Track seen tags to detect duplicates (silently handle duplicates)
-	seenA := make(map[string]struct{})
-	for _, tag := range a {
-		if _, exists := seenA[tag]; !exists {
-			seenA[tag] = struct{}{}
-		}
-		mapA[tag]++
+// tagCounts returns a map of tag -> count for the slice (handles duplicates).
+func tagCounts(s []string) map[string]int {
+	m := make(map[string]int)
+	for _, tag := range s {
+		m[tag]++
 	}
+	return m
+}
 
-	seenB := make(map[string]struct{})
-	for _, tag := range b {
-		if _, exists := seenB[tag]; !exists {
-			seenB[tag] = struct{}{}
-		}
-		mapB[tag]++
-	}
-
-	if len(mapA) != len(mapB) {
+// tagCountsEqual reports whether two tag-count maps are equal.
+func tagCountsEqual(a, b map[string]int) bool {
+	if len(a) != len(b) {
 		return false
 	}
-
-	for tag, count := range mapA {
-		if mapB[tag] != count {
+	for tag, count := range a {
+		if b[tag] != count {
 			return false
 		}
 	}
