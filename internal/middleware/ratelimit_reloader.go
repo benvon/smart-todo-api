@@ -20,6 +20,7 @@ import (
 type RateLimitReloader struct {
 	next        http.Handler
 	redisClient *redis.Client
+	store       limiter.Store
 	repo        *database.RatelimitConfigRepository
 	defaultRate string
 	log         *zap.Logger
@@ -33,8 +34,17 @@ func NewRateLimitReloader(redisClient *redis.Client, repo *database.RatelimitCon
 	if defaultRate == "" {
 		defaultRate = defaultRatelimitRate
 	}
+	// Create Redis store once during initialization
+	store, err := redisstore.NewStore(redisClient)
+	if err != nil {
+		log.Error("failed_to_create_redis_store_for_rate_limiter",
+			zap.Error(err),
+		)
+		return nil
+	}
 	return &RateLimitReloader{
 		redisClient: redisClient,
+		store:       store,
 		repo:        repo,
 		defaultRate: defaultRate,
 		log:         log,
@@ -109,15 +119,8 @@ func (r *RateLimitReloader) load(ctx context.Context) {
 		}
 	}
 
-	store, err := redisstore.NewStore(r.redisClient)
-	if err != nil {
-		r.log.Error("failed_to_create_redis_store_for_rate_limiter",
-			zap.Error(err),
-		)
-		return
-	}
-
-	instance := limiter.New(store, rate)
+	// Reuse the existing Redis store, only create a new limiter instance with the new rate
+	instance := limiter.New(r.store, rate)
 	keyGetter := func(req *http.Request) string {
 		return request.ClientIP(req)
 	}

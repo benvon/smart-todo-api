@@ -231,8 +231,11 @@ func main() {
 	// 2. CORS (load from DB, hot-reload; fallback to FRONTEND_URL)
 	corsReloader := middleware.NewCORSReloader(corsConfigRepo, cfg.FrontendURL, zapLogger, 1*time.Minute)
 	r.Use(corsReloader.Middleware())
-	// Rate limit (load from DB, hot-reload)
+	// Rate limit middleware (applied selectively to specific routes, not globally)
 	rateLimitReloader := middleware.NewRateLimitReloader(redisLimiter.Client(), ratelimitConfigRepo, "5-S", zapLogger, 1*time.Minute)
+	if rateLimitReloader == nil {
+		zapLogger.Fatal("failed_to_create_rate_limit_reloader")
+	}
 	rateLimitMW := rateLimitReloader.Middleware()
 	// 3. Request size limits (protects against DoS)
 	r.Use(middleware.MaxRequestSize(middleware.DefaultMaxRequestSize))
