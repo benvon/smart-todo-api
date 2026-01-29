@@ -23,7 +23,7 @@ type JobQueue interface {
 }
 
 // DLQPurger removes dead-lettered messages older than a retention period.
-// Implementations typically consume from the DLQ, ack (discard) old messages, and nack+requeue recent ones.
+// Implementations consume from the DLQ, ack (discard) old messages, and nack without requeue for recent ones so the purge completes.
 type DLQPurger interface {
 	PurgeOlderThan(ctx context.Context, retention time.Duration) (purged int, err error)
 }

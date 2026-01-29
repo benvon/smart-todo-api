@@ -428,8 +428,8 @@ func (q *RabbitMQQueue) HealthCheck(ctx context.Context) error {
 }
 
 // PurgeOlderThan implements DLQPurger. It Get()s from the DLQ, acks (discards) messages older than
-// retention, and nack+requeues newer ones. Uses a dedicated channel to avoid interfering with
-// main queue operations.
+// retention, and nacks without requeue for newer ones so the loop can complete. Uses a dedicated
+// channel to avoid interfering with main queue operations.
 func (q *RabbitMQQueue) PurgeOlderThan(ctx context.Context, retention time.Duration) (int, error) {
 	ch, err := q.conn.Channel()
 	if err != nil {
@@ -468,7 +468,7 @@ func (q *RabbitMQQueue) PurgeOlderThan(ctx context.Context, retention time.Durat
 			}
 			purged++
 		} else {
-			_ = msg.Nack(false, true)
+			_ = msg.Nack(false, false)
 		}
 	}
 }
