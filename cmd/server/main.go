@@ -323,6 +323,21 @@ func main() {
 	go corsReloader.Start(reloadCtx)
 	go rateLimitReloader.Start(reloadCtx)
 
+	// Start DLQ garbage collector if the queue implementation supports it
+	// Run every hour, retain messages for 24 hours
+	if dlqPurger, ok := jobQueue.(queue.DLQPurger); ok {
+		dlqGC := queue.NewGarbageCollector(dlqPurger, 1*time.Hour, 24*time.Hour)
+		go func() {
+			if err := dlqGC.Start(reloadCtx); err != nil && err != context.Canceled {
+				zapLogger.Error("dlq_garbage_collector_stopped_with_error", zap.Error(err))
+			}
+		}()
+		zapLogger.Info("started_dlq_garbage_collector",
+			zap.Duration("interval", 1*time.Hour),
+			zap.Duration("retention", 24*time.Hour),
+		)
+	}
+
 	// Start server in a goroutine
 	go func() {
 		zapLogger.Info("server_starting",
