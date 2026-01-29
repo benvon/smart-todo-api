@@ -7,7 +7,7 @@
 
 ## Profile
 
-- **Load path:** The profile panel has a single load path: on open, it shows loading, then fetches user, AI context, and tag stats in parallel with a 10s timeout (`PROFILE_FETCH_TIMEOUT_MS`). A hanging request will not leave the UI stuck on "Loading..."; timeout and API errors are surfaced via `showError`.
+- **Load path:** The profile panel has a single load path: on open, it shows loading, then fetches user, AI context, and tag stats sequentially, each with a 10s timeout (`PROFILE_FETCH_TIMEOUT_MS`). Sequential fetching prevents responses from interleaving or overwriting. A hanging request will not leave the UI stuck on "Loading..."; timeout and API errors are surfaced via `showError`.
 - **Context:** Profile and chat share a single source of truth for AI context via `context.js` (`getContext` / `setContext`). Saving context from the profile updates the shared context so chat stays in sync.
 
 ## Module Structure
