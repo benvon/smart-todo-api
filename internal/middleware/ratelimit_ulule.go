@@ -30,7 +30,9 @@ func RateLimitFromDB(redisClient *redis.Client, repo *database.RatelimitConfigRe
 	if cfg != nil && cfg.Rate != "" {
 		rateStr = cfg.Rate
 	} else {
-		_ = repo.Set(ctx, &models.RatelimitConfig{Rate: defaultRate})
+		if err = repo.Set(ctx, &models.RatelimitConfig{Rate: defaultRate}); err != nil {
+			return nil, err
+		}
 	}
 	rate, err := limiter.NewRateFromFormatted(rateStr)
 	if err != nil {
