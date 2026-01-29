@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/benvon/smart-todo/cmd/configure/commands"
+	"github.com/spf13/cobra"
 )
 
 func main() {
@@ -18,6 +18,8 @@ func main() {
 	rootCmd.AddCommand(commands.NewOIDCCmd())
 	rootCmd.AddCommand(commands.NewListCmd())
 	rootCmd.AddCommand(commands.NewTestCmd())
+	rootCmd.AddCommand(commands.NewCorsCmd())
+	rootCmd.AddCommand(commands.NewRatelimitCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

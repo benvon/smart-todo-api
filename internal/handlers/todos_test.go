@@ -175,7 +175,7 @@ func TestTodoHandler_GetTagStats_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil, zap.NewNop())
+	handler := NewTodoHandler(nil, zap.NewNop(), WithTodoTagStatsRepo(mockTagStatsRepo))
 
 	user := &models.User{
 		ID:    userID,
@@ -223,7 +223,7 @@ func TestTodoHandler_GetTagStats_Success(t *testing.T) {
 func TestTodoHandler_GetTagStats_Unauthorized(t *testing.T) {
 	t.Parallel()
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, nil, nil, zap.NewNop())
+	handler := NewTodoHandler(nil, zap.NewNop())
 
 	req := httptest.NewRequest("GET", "/api/v1/todos/tags/stats", nil)
 	// No user in context
@@ -247,7 +247,7 @@ func TestTodoHandler_GetTagStats_DatabaseError(t *testing.T) {
 		},
 	}
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil, zap.NewNop())
+	handler := NewTodoHandler(nil, zap.NewNop(), WithTodoTagStatsRepo(mockTagStatsRepo))
 
 	user := &models.User{
 		ID:    userID,
@@ -290,7 +290,7 @@ func TestTodoHandler_GetTagStats_StaleData(t *testing.T) {
 		},
 	}
 
-	handler := NewTodoHandlerWithQueueAndTagStats(nil, mockTagStatsRepo, nil, zap.NewNop())
+	handler := NewTodoHandler(nil, zap.NewNop(), WithTodoTagStatsRepo(mockTagStatsRepo))
 
 	user := &models.User{
 		ID:    userID,
@@ -375,7 +375,7 @@ var _ database.TagStatisticsRepositoryInterface = (*mockTagStatisticsRepoForHand
 func TestTodoHandler_GetTagStats_RouteNotRegisteredWhenNil(t *testing.T) {
 	t.Parallel()
 
-	// Create handler without tagStatsRepo (like NewTodoHandler or NewTodoHandlerWithQueue)
+	// Create handler without tagStatsRepo
 	mockTodoRepo := &database.TodoRepository{} // Minimal mock
 	handler := NewTodoHandler(mockTodoRepo, zap.NewNop())
 

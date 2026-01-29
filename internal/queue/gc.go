@@ -6,54 +6,52 @@ import (
 	"time"
 )
 
-// GarbageCollector handles garbage collection of expired jobs
+// GarbageCollector runs periodic DLQ purges, removing messages older than retention.
 type GarbageCollector struct {
-	queue     JobQueue
-	dlqName   string
+	dlqPurger DLQPurger
 	interval  time.Duration
 	retention time.Duration
 }
 
-// NewGarbageCollector creates a new garbage collector
-func NewGarbageCollector(queue JobQueue, interval time.Duration, retention time.Duration) *GarbageCollector {
+// NewGarbageCollector creates a new garbage collector. purger is used to purge DLQ messages
+// older than retention; pass a RabbitMQ queue (implements DLQPurger) or another implementation.
+func NewGarbageCollector(purger DLQPurger, interval time.Duration, retention time.Duration) *GarbageCollector {
 	return &GarbageCollector{
-		queue:     queue,
+		dlqPurger: purger,
 		interval:  interval,
 		retention: retention,
-		dlqName:   DefaultDLQName,
 	}
 }
 
-// Start starts the garbage collection process
+// Start runs the GC loop until ctx is cancelled.
 func (gc *GarbageCollector) Start(ctx context.Context) error {
 	ticker := time.NewTicker(gc.interval)
 	defer ticker.Stop()
-	
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 			if err := gc.collect(ctx); err != nil {
-				// Log error but continue
-				fmt.Printf("Garbage collection error: %v\n", err)
+				fmt.Printf("DLQ GC error: %v\n", err)
 			}
 		}
 	}
 }
 
-// collect performs a garbage collection pass
+// collect purges DLQ messages older than retention.
 func (gc *GarbageCollector) collect(ctx context.Context) error {
-	// Note: In a real implementation, we'd need to access the DLQ directly
-	// For now, this is a placeholder that would need to be implemented
-	// based on the specific queue implementation (RabbitMQ has methods to
-	// query DLQ messages)
-	
-	// The actual implementation would:
-	// 1. Query the DLQ for expired messages (older than retention period)
-	// 2. Optionally archive them to a database
-	// 3. Delete old archived jobs after extended retention (e.g., 30 days)
-	// 4. Monitor queue sizes and alert on buildup
-	
+	if gc.dlqPurger == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	n, err := gc.dlqPurger.PurgeOlderThan(ctx, gc.retention)
+	if err != nil {
+		return fmt.Errorf("DLQ purge: %w", err)
+	}
+	if n > 0 {
+		fmt.Printf("DLQ GC purged %d message(s) older than %v\n", n, gc.retention)
+	}
 	return nil
 }

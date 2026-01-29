@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	logpkg "github.com/benvon/smart-todo/internal/logger"
+	"github.com/benvon/smart-todo/internal/request"
 	"go.uber.org/zap"
 )
 
@@ -19,8 +20,7 @@ func Audit(logger *zap.Logger) func(http.Handler) http.Handler {
 			// Log security-relevant events
 			statusCode := wrapped.statusCode
 			if statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden {
-				// Log failed authentication/authorization attempts
-				ip := getClientIP(r)
+				ip := request.ClientIP(r)
 				logger.Warn("security_event",
 					zap.Int("status_code", statusCode),
 					zap.String("method", r.Method),
@@ -28,10 +28,8 @@ func Audit(logger *zap.Logger) func(http.Handler) http.Handler {
 					zap.String("ip", logpkg.SanitizeString(ip, logpkg.MaxGeneralStringLength)),
 				)
 			}
-
-			// Log rate limit violations (429 Too Many Requests)
 			if statusCode == http.StatusTooManyRequests {
-				ip := getClientIP(r)
+				ip := request.ClientIP(r)
 				logger.Warn("rate_limit_violation",
 					zap.String("method", r.Method),
 					zap.String("path", logpkg.SanitizePath(r.URL.Path)),

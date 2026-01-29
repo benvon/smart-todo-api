@@ -13,3 +13,8 @@ linters:
     - bidichk
     - contextcheck
     - ineffassign
+    - gocyclo
+
+linters-settings:
+  gocyclo:
+    min-complexity: 10

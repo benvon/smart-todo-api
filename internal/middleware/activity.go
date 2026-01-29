@@ -7,6 +7,7 @@ import (
 
 	"github.com/benvon/smart-todo/internal/database"
 	logpkg "github.com/benvon/smart-todo/internal/logger"
+	"github.com/benvon/smart-todo/internal/request"
 	"go.uber.org/zap"
 )
 
@@ -15,7 +16,7 @@ func ActivityTracking(activityRepo *database.UserActivityRepository, logger *zap
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Only track activity for authenticated requests
-			user := UserFromContext(r)
+			user := request.UserFromContext(r)
 			if user != nil {
 				ctx := r.Context()
 

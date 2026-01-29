@@ -421,10 +421,54 @@ func (q *RabbitMQQueue) HealthCheck(ctx context.Context) error {
 	if q.channel.IsClosed() {
 		return fmt.Errorf("RabbitMQ channel is closed")
 	}
-	// Try a lightweight operation to verify connectivity by passively declaring the queue.
-	// This performs a round-trip to the broker without modifying queue state.
 	if _, err := q.channel.QueueDeclarePassive(q.queueName, true, false, false, false, nil); err != nil {
 		return fmt.Errorf("RabbitMQ health check failed: %w", err)
 	}
 	return nil
+}
+
+// PurgeOlderThan implements DLQPurger. It Get()s from the DLQ, acks (discards) messages older than
+// retention, and nack+requeues newer ones. Uses a dedicated channel to avoid interfering with
+// main queue operations.
+func (q *RabbitMQQueue) PurgeOlderThan(ctx context.Context, retention time.Duration) (int, error) {
+	ch, err := q.conn.Channel()
+	if err != nil {
+		return 0, fmt.Errorf("DLQ purge: open channel: %w", err)
+	}
+	defer func() { _ = ch.Close() }()
+	cutoff := time.Now().Add(-retention)
+	var purged int
+	for {
+		select {
+		case <-ctx.Done():
+			return purged, ctx.Err()
+		default:
+		}
+		msg, ok, err := ch.Get(q.dlqName, false)
+		if err != nil {
+			return purged, fmt.Errorf("DLQ purge get: %w", err)
+		}
+		if !ok {
+			return purged, nil
+		}
+		var age time.Time
+		if !msg.Timestamp.IsZero() {
+			age = msg.Timestamp
+		} else {
+			var j Job
+			if jsonErr := json.Unmarshal(msg.Body, &j); jsonErr == nil {
+				age = j.CreatedAt
+			} else {
+				age = time.Now()
+			}
+		}
+		if age.Before(cutoff) {
+			if ackErr := msg.Ack(false); ackErr != nil {
+				return purged, fmt.Errorf("DLQ purge ack: %w", ackErr)
+			}
+			purged++
+		} else {
+			_ = msg.Nack(false, true)
+		}
+	}
 }

@@ -94,38 +94,62 @@ func NewOpenAIProviderWithConfig(apiKey string, baseURL string, model string) *O
 
 // AnalyzeTask analyzes a task and returns suggested tags and time horizon
 func (p *OpenAIProvider) AnalyzeTask(ctx context.Context, text string, userContext *models.AIContext) ([]string, models.TimeHorizon, error) {
-	// Use current time as creation time when not provided
 	return p.AnalyzeTaskWithDueDate(ctx, text, nil, time.Now(), userContext, nil)
 }
 
-// AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon
-// tagStats is optional tag statistics to guide tag selection (prefer existing tags)
-func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
-	// Extract request ID and user ID from context for logging
-	requestID := ExtractRequestID(ctx)
-	var userIDStr string
-	if userID := ctx.Value(UserIDContextKey()); userID != nil {
-		if id, ok := userID.(uuid.UUID); ok {
-			userIDStr = id.String()
+func parseAndValidateAnalysisResponse(content string) ([]string, models.TimeHorizon, error) {
+	var analysis struct {
+		Tags        []string `json:"tags"`
+		TimeHorizon string   `json:"time_horizon"`
+	}
+	raw := content
+	if err := json.Unmarshal([]byte(raw), &analysis); err != nil {
+		if len(raw) > 0 && raw[0] != '{' {
+			start := bytes.Index([]byte(raw), []byte("{"))
+			end := bytes.LastIndex([]byte(raw), []byte("}"))
+			if start != -1 && end != -1 && end > start {
+				raw = raw[start : end+1]
+			}
+		}
+		if err := json.Unmarshal([]byte(raw), &analysis); err != nil {
+			return nil, models.TimeHorizonSoon, fmt.Errorf("failed to parse analysis response: %w", err)
 		}
 	}
-	var todoIDStr string
-	if todoID := ctx.Value(TodoIDContextKey()); todoID != nil {
-		if id, ok := todoID.(uuid.UUID); ok {
-			todoIDStr = id.String()
-		}
+	th := models.TimeHorizon(analysis.TimeHorizon)
+	switch th {
+	case models.TimeHorizonNext, models.TimeHorizonSoon, models.TimeHorizonLater:
+	default:
+		th = models.TimeHorizonSoon
 	}
+	return analysis.Tags, th, nil
+}
 
-	// Build prompt with user context, due date, creation time, and tag statistics
+// buildAndSendAnalysisRequest builds the prompt, sends the request, and returns the response content or an error.
+func (p *OpenAIProvider) buildAndSendAnalysisRequest(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) (string, error) {
 	prompt := p.buildAnalysisPrompt(text, dueDate, createdAt, userContext, tagStats)
-
-	// Build messages
 	messages := []openai.ChatCompletionMessageParamUnion{
 		openai.SystemMessage("You are a helpful assistant that analyzes todo items and suggests tags and time horizons. Respond with valid JSON only."),
 		openai.UserMessage(prompt),
 	}
-
-	// Log request if debug mode enabled
+	req := openai.ChatCompletionNewParams{
+		Model:    shared.ChatModel(p.model),
+		Messages: messages,
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
+		},
+	}
+	requestID := ExtractRequestID(ctx)
+	var userIDStr, todoIDStr string
+	if id := ctx.Value(UserIDContextKey()); id != nil {
+		if u, ok := id.(uuid.UUID); ok {
+			userIDStr = u.String()
+		}
+	}
+	if id := ctx.Value(TodoIDContextKey()); id != nil {
+		if u, ok := id.(uuid.UUID); ok {
+			todoIDStr = u.String()
+		}
+	}
 	if p.logger != nil && p.debugMode {
 		p.logger.Debug("llm_api_request",
 			zap.String("operation", "analyze_task"),
@@ -138,33 +162,10 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 			zap.String("request_id", requestID),
 		)
 	}
-
-	// Create request with JSON response format
-	// Note: Some models (like o1) don't support custom temperature values
-	// We'll omit temperature to use the model's default (typically 1.0)
-	req := openai.ChatCompletionNewParams{
-		Model:    shared.ChatModel(p.model),
-		Messages: messages,
-		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
-			OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
-		},
-		// Temperature omitted - use model default to avoid "unsupported_value" errors
-		// Some models only support their default temperature value
-	}
-
-	startTime := time.Now()
+	start := time.Now()
 	resp, err := p.client.Chat.Completions.New(ctx, req)
-	latency := time.Since(startTime)
+	latency := time.Since(start)
 	if err != nil {
-		// Wrap error with API error details for better handling
-		if apiErr := ExtractAPIError(err); apiErr != nil {
-			return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", apiErr)
-		}
-		return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", err)
-	}
-
-	if err != nil {
-		// Log error if debug mode enabled
 		if p.logger != nil && p.debugMode {
 			p.logger.Debug("llm_api_error",
 				zap.String("operation", "analyze_task"),
@@ -176,21 +177,15 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 				zap.Duration("latency_ms", latency),
 			)
 		}
-		// Wrap error with API error details for better handling
 		if apiErr := ExtractAPIError(err); apiErr != nil {
-			return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", apiErr)
+			return "", fmt.Errorf("failed to analyze task: %w", apiErr)
 		}
-		return nil, models.TimeHorizonSoon, fmt.Errorf("failed to analyze task: %w", err)
+		return "", fmt.Errorf("failed to analyze task: %w", err)
 	}
-
 	if len(resp.Choices) == 0 {
-		return nil, models.TimeHorizonSoon, errors.New(ErrNoChoicesInResponse)
+		return "", errors.New(ErrNoChoicesInResponse)
 	}
-
-	// Get content from first choice (Content is a string directly in the SDK)
 	content := resp.Choices[0].Message.Content
-
-	// Log response if debug mode enabled
 	if p.logger != nil && p.debugMode {
 		p.logger.Debug("llm_api_response",
 			zap.String("operation", "analyze_task"),
@@ -203,41 +198,21 @@ func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string
 			zap.Int64("latency_ms", latency.Milliseconds()),
 		)
 	}
+	return content, nil
+}
 
-	// Parse response - OpenAI returns JSON in content field
-	var analysis struct {
-		Tags        []string `json:"tags"`
-		TimeHorizon string   `json:"time_horizon"`
+// AnalyzeTaskWithDueDate analyzes a task with an optional due date and creation time, returns suggested tags and time horizon.
+// tagStats is optional tag statistics to guide tag selection (prefer existing tags).
+func (p *OpenAIProvider) AnalyzeTaskWithDueDate(ctx context.Context, text string, dueDate *time.Time, createdAt time.Time, userContext *models.AIContext, tagStats *models.TagStatistics) ([]string, models.TimeHorizon, error) {
+	content, err := p.buildAndSendAnalysisRequest(ctx, text, dueDate, createdAt, userContext, tagStats)
+	if err != nil {
+		return nil, models.TimeHorizonSoon, err
 	}
-
-	// The response content should already be JSON if we requested json_object format
-	if err := json.Unmarshal([]byte(content), &analysis); err != nil {
-		// Fallback: try to extract JSON from markdown code blocks if needed
-		if len(content) > 0 && content[0] != '{' {
-			// Try to find JSON in the response
-			start := bytes.Index([]byte(content), []byte("{"))
-			end := bytes.LastIndex([]byte(content), []byte("}"))
-			if start != -1 && end != -1 && end > start {
-				content = content[start : end+1]
-			}
-		}
-
-		if err := json.Unmarshal([]byte(content), &analysis); err != nil {
-			return nil, models.TimeHorizonSoon, fmt.Errorf("failed to parse analysis response: %w", err)
-		}
+	tags, th, err := parseAndValidateAnalysisResponse(content)
+	if err != nil {
+		return nil, models.TimeHorizonSoon, err
 	}
-
-	// Validate time horizon
-	timeHorizon := models.TimeHorizon(analysis.TimeHorizon)
-	switch timeHorizon {
-	case models.TimeHorizonNext, models.TimeHorizonSoon, models.TimeHorizonLater:
-		// Valid
-	default:
-		// Default to soon if invalid
-		timeHorizon = models.TimeHorizonSoon
-	}
-
-	return analysis.Tags, timeHorizon, nil
+	return tags, th, nil
 }
 
 // Chat handles a chat message and returns the AI response

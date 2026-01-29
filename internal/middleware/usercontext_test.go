@@ -6,8 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/benvon/smart-todo/internal/request"
+	"github.com/google/uuid"
 )
 
 func TestUserFromContext(t *testing.T) {
@@ -53,8 +54,7 @@ func TestUserFromContext(t *testing.T) {
 		{
 			name: "wrong type in context",
 			setup: func(r *http.Request) *http.Request {
-				ctx := r.Context()
-				ctx = context.WithValue(ctx, userContextKey, "not a user")
+				ctx := context.WithValue(r.Context(), request.UserContextKey(), "not a user")
 				return r.WithContext(ctx)
 			},
 			validate: func(t *testing.T, user *models.User) {
@@ -72,7 +72,7 @@ func TestUserFromContext(t *testing.T) {
 			req := httptest.NewRequest("GET", "/test", nil)
 			req = tt.setup(req)
 
-			user := UserFromContext(req)
+			user := request.UserFromContext(req)
 
 			if tt.validate != nil {
 				tt.validate(t, user)

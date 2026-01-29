@@ -7,15 +7,19 @@ import (
 	"time"
 
 	"github.com/benvon/smart-todo/internal/database"
-	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/queue"
 )
 
+// Pinger is implemented by dependencies that support a connectivity check (e.g. Redis).
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
 // HealthChecker handles health check requests
 type HealthChecker struct {
-	db           *database.DB
-	redisLimiter *middleware.RedisRateLimiter
-	jobQueue     queue.JobQueue
+	db          *database.DB
+	redisPinger Pinger
+	jobQueue    queue.JobQueue
 }
 
 // NewHealthChecker creates a new health checker
@@ -24,11 +28,11 @@ func NewHealthChecker(db *database.DB) *HealthChecker {
 }
 
 // NewHealthCheckerWithDeps creates a new health checker with Redis and RabbitMQ dependencies
-func NewHealthCheckerWithDeps(db *database.DB, redisLimiter *middleware.RedisRateLimiter, jobQueue queue.JobQueue) *HealthChecker {
+func NewHealthCheckerWithDeps(db *database.DB, redisPinger Pinger, jobQueue queue.JobQueue) *HealthChecker {
 	return &HealthChecker{
-		db:           db,
-		redisLimiter: redisLimiter,
-		jobQueue:     jobQueue,
+		db:          db,
+		redisPinger: redisPinger,
+		jobQueue:    jobQueue,
 	}
 }
 
@@ -39,74 +43,67 @@ type HealthResponse struct {
 	Checks    map[string]string `json:"checks,omitempty"`
 }
 
+// runExtendedChecks runs database, Redis, and RabbitMQ checks and returns checks map and overall status.
+func (h *HealthChecker) runExtendedChecks(ctx context.Context) (map[string]string, string) {
+	checks := make(map[string]string)
+	status := "healthy"
+
+	if err := h.checkDatabase(ctx); err != nil {
+		status = "unhealthy"
+		checks["database"] = "unhealthy"
+	} else {
+		checks["database"] = "healthy"
+	}
+
+	if h.redisPinger != nil {
+		if err := h.checkRedis(ctx); err != nil {
+			status = "unhealthy"
+			checks["redis"] = "unhealthy"
+		} else {
+			checks["redis"] = "healthy"
+		}
+	} else {
+		checks["redis"] = "not configured"
+	}
+
+	if h.jobQueue != nil {
+		if err := h.checkRabbitMQ(ctx); err != nil {
+			status = "unhealthy"
+			checks["rabbitmq"] = "unhealthy"
+		} else {
+			checks["rabbitmq"] = "healthy"
+		}
+	} else {
+		checks["rabbitmq"] = "not configured"
+	}
+
+	return checks, status
+}
+
+// writeHealthResponse writes a HealthResponse with the given status and optional checks.
+func (h *HealthChecker) writeHealthResponse(w http.ResponseWriter, status string, checks map[string]string) {
+	code := http.StatusOK
+	if status == "unhealthy" {
+		code = http.StatusServiceUnavailable
+	}
+	resp := HealthResponse{
+		Status:    status,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Checks:    checks,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 // HealthCheck handles the /healthz endpoint
 func (h *HealthChecker) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	mode := r.URL.Query().Get("mode")
-
-	response := HealthResponse{
-		Status:    "healthy",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	if mode == "extended" {
-		checks := make(map[string]string)
-
-		// Check database connection
-		if err := h.checkDatabase(r.Context()); err != nil {
-			response.Status = "unhealthy"
-			// Don't expose detailed error messages - just indicate unhealthy
-			checks["database"] = "unhealthy"
-		} else {
-			checks["database"] = "healthy"
-		}
-
-		// Check Redis connection
-		if h.redisLimiter != nil {
-			if err := h.checkRedis(r.Context()); err != nil {
-				response.Status = "unhealthy"
-				checks["redis"] = "unhealthy"
-			} else {
-				checks["redis"] = "healthy"
-			}
-		} else {
-			checks["redis"] = "not configured"
-		}
-
-		// Check RabbitMQ connection
-		if h.jobQueue != nil {
-			if err := h.checkRabbitMQ(r.Context()); err != nil {
-				response.Status = "unhealthy"
-				checks["rabbitmq"] = "unhealthy"
-			} else {
-				checks["rabbitmq"] = "healthy"
-			}
-		} else {
-			checks["rabbitmq"] = "not configured"
-		}
-
-		response.Checks = checks
-
-		statusCode := http.StatusOK
-		if response.Status == "unhealthy" {
-			statusCode = http.StatusServiceUnavailable
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(statusCode)
-		if err := json.NewEncoder(w).Encode(response); err != nil {
-			// Log error but response already started, can't send error response
-			return
-		}
+	if r.URL.Query().Get("mode") == "extended" {
+		checks, status := h.runExtendedChecks(r.Context())
+		h.writeHealthResponse(w, status, checks)
 		return
 	}
-
-	// Basic mode - just return that the server is running
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		// Log error but response already started, can't send error response
-		return
-	}
+	h.writeHealthResponse(w, "healthy", nil)
 }
 
 // checkDatabase verifies the database connection
@@ -121,21 +118,14 @@ func (h *HealthChecker) checkDatabase(ctx context.Context) error {
 	return nil
 }
 
-// checkRedis verifies the Redis connection
+// checkRedis verifies the Redis connection via Pinger
 func (h *HealthChecker) checkRedis(ctx context.Context) error {
-	if h.redisLimiter == nil {
-		return nil // Not configured, skip check
+	if h.redisPinger == nil {
+		return nil
 	}
-
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-
-	// Use the Redis client's Ping method
-	// The RedisRateLimiter wraps a redis.Client, but we need to access it
-	// For now, we'll use a simple approach: try to get a key (which will ping)
-	// Actually, we need to add a Ping method to RedisRateLimiter or access the client
-	// Let's add a simple health check method to RedisRateLimiter
-	return h.redisLimiter.Ping(ctx)
+	return h.redisPinger.Ping(ctx)
 }
 
 // checkRabbitMQ verifies the RabbitMQ connection

@@ -17,19 +17,28 @@ type TagAnalyzer struct {
 	todoRepo     database.TodoRepositoryInterface
 	tagStatsRepo database.TagStatisticsRepositoryInterface
 	logger       *zap.Logger
+	registry     map[queue.JobType]processorEntry
 }
 
-// NewTagAnalyzer creates a new tag analyzer
+// NewTagAnalyzer creates a new tag analyzer and registers the tag_analysis processor.
 func NewTagAnalyzer(
 	todoRepo database.TodoRepositoryInterface,
 	tagStatsRepo database.TagStatisticsRepositoryInterface,
 	logger *zap.Logger,
 ) *TagAnalyzer {
-	return &TagAnalyzer{
+	a := &TagAnalyzer{
 		todoRepo:     todoRepo,
 		tagStatsRepo: tagStatsRepo,
 		logger:       logger,
+		registry:     make(map[queue.JobType]processorEntry),
 	}
+	a.RegisterProcessor(queue.JobTypeTagAnalysis, a.ProcessTagAnalysisJob, false)
+	return a
+}
+
+// RegisterProcessor registers a processor for a job type.
+func (a *TagAnalyzer) RegisterProcessor(typ queue.JobType, proc JobProcessor, useHandleJobError bool) {
+	a.registry[typ] = processorEntry{proc: proc, useHandleJobError: useHandleJobError}
 }
 
 // ProcessTagAnalysisJob processes a tag analysis job
@@ -180,20 +189,15 @@ func (a *TagAnalyzer) ProcessTagAnalysisJob(ctx context.Context, job *queue.Job)
 	return nil
 }
 
-// ProcessJob processes a job based on its type
+// ProcessJob processes a job based on its type using the processor registry.
 func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface) error {
 	job := msg.GetJob()
-
-	// Check if job should be processed now (respect NotBefore)
 	if !job.ShouldProcess() {
-		fields := []zap.Field{
-			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
-		}
+		fields := []zap.Field{zap.String("job_id", logpkg.SanitizeUserID(job.ID.String()))}
 		if job.NotBefore != nil {
 			fields = append(fields, zap.Time("not_before", *job.NotBefore))
 		}
 		a.logger.Debug("tag_analysis_job_not_ready", fields...)
-		// Re-ack to return to queue and wait
 		if ackErr := msg.Ack(); ackErr != nil {
 			a.logger.Warn("failed_to_ack_job_for_later_processing",
 				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
@@ -202,32 +206,8 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 		}
 		return nil
 	}
-
-	switch job.Type {
-	case queue.JobTypeTagAnalysis:
-		if err := a.ProcessTagAnalysisJob(ctx, job); err != nil {
-			// For tag analysis errors, log and nack without requeue
-			// Tag analysis can be retried later if needed
-			a.logger.Error("tag_analysis_job_failed",
-				zap.String("operation", "process_job"),
-				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
-				zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
-				zap.String("error", logpkg.SanitizeError(err)),
-			)
-			if nackErr := msg.Nack(false); nackErr != nil {
-				a.logger.Warn("failed_to_nack_tag_analysis_job",
-					zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
-					zap.String("error", logpkg.SanitizeError(nackErr)),
-				)
-			}
-			return fmt.Errorf("tag analysis failed: %w", err)
-		}
-		if ackErr := msg.Ack(); ackErr != nil {
-			return fmt.Errorf("failed to ack tag analysis job: %w", ackErr)
-		}
-		return nil
-
-	default:
+	ent, ok := a.registry[job.Type]
+	if !ok {
 		if nackErr := msg.Nack(false); nackErr != nil {
 			a.logger.Error("failed_to_nack_unknown_job_type",
 				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
@@ -237,4 +217,23 @@ func (a *TagAnalyzer) ProcessJob(ctx context.Context, msg queue.MessageInterface
 		}
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}
+	if err := ent.proc(ctx, job); err != nil {
+		a.logger.Error("tag_analysis_job_failed",
+			zap.String("operation", "process_job"),
+			zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+			zap.String("user_id", logpkg.SanitizeUserID(job.UserID.String())),
+			zap.String("error", logpkg.SanitizeError(err)),
+		)
+		if nackErr := msg.Nack(false); nackErr != nil {
+			a.logger.Warn("failed_to_nack_tag_analysis_job",
+				zap.String("job_id", logpkg.SanitizeUserID(job.ID.String())),
+				zap.String("error", logpkg.SanitizeError(nackErr)),
+			)
+		}
+		return fmt.Errorf("tag analysis failed: %w", err)
+	}
+	if ackErr := msg.Ack(); ackErr != nil {
+		return fmt.Errorf("failed to ack tag analysis job: %w", ackErr)
+	}
+	return nil
 }

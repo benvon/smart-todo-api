@@ -9,8 +9,8 @@ import (
 
 	"github.com/benvon/smart-todo/internal/database"
 	logpkg "github.com/benvon/smart-todo/internal/logger"
-	"github.com/benvon/smart-todo/internal/middleware"
 	"github.com/benvon/smart-todo/internal/models"
+	"github.com/benvon/smart-todo/internal/request"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/gorilla/mux"
 	"go.uber.org/zap"
@@ -47,7 +47,7 @@ type ChatMessageRequest struct {
 
 // StartChat starts a chat session and returns SSE stream
 func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
@@ -133,7 +133,7 @@ func (h *ChatHandler) StartChat(w http.ResponseWriter, r *http.Request) {
 
 // SendMessage sends a message in the chat session
 func (h *ChatHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFromContext(r)
+	user := request.UserFromContext(r)
 	if user == nil {
 		respondJSONError(w, http.StatusUnauthorized, "Unauthorized", "User not found in context")
 		return
