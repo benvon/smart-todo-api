@@ -14,7 +14,6 @@ linters:
     - contextcheck
     - ineffassign
     - gocyclo
-
-linters-settings:
-  gocyclo:
-    min-complexity: 10
+  settings:
+    gocyclo:
+      min-complexity: 10
