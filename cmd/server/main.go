@@ -217,11 +217,6 @@ func main() {
 		chatHandler = handlers.NewChatHandler(chatService, contextService, contextRepo, zapLogger)
 	}
 
-	rateLimitMW, err := middleware.RateLimitFromDB(redisLimiter.Client(), ratelimitConfigRepo, "5-S")
-	if err != nil {
-		zapLogger.Fatal("failed_to_create_rate_limit_middleware", zap.Error(err))
-	}
-
 	// Setup router
 	r := mux.NewRouter()
 
@@ -236,6 +231,12 @@ func main() {
 	// 2. CORS (load from DB, hot-reload; fallback to FRONTEND_URL)
 	corsReloader := middleware.NewCORSReloader(corsConfigRepo, cfg.FrontendURL, zapLogger, 1*time.Minute)
 	r.Use(corsReloader.Middleware())
+	// Rate limit middleware (applied selectively to specific routes, not globally)
+	rateLimitReloader := middleware.NewRateLimitReloader(redisLimiter.Client(), ratelimitConfigRepo, "5-S", zapLogger, 1*time.Minute)
+	if rateLimitReloader == nil {
+		zapLogger.Fatal("failed_to_create_rate_limit_reloader")
+	}
+	rateLimitMW := rateLimitReloader.Middleware()
 	// 3. Request size limits (protects against DoS)
 	r.Use(middleware.MaxRequestSize(middleware.DefaultMaxRequestSize))
 	// 4. Content-Type validation for POST/PATCH/PUT requests
@@ -319,10 +320,26 @@ func main() {
 		MaxHeaderBytes: 1 << 20, // 1MB max header size
 	}
 
-	// CORS hot-reload loop
-	corsCtx, corsCancel := context.WithCancel(context.Background())
-	defer corsCancel()
-	go corsReloader.Start(corsCtx)
+	// CORS and rate limit hot-reload loops
+	reloadCtx, reloadCancel := context.WithCancel(context.Background())
+	defer reloadCancel()
+	go corsReloader.Start(reloadCtx)
+	go rateLimitReloader.Start(reloadCtx)
+
+	// Start DLQ garbage collector if the queue implementation supports it
+	// Run every hour, retain messages for 24 hours
+	if dlqPurger, ok := jobQueue.(queue.DLQPurger); ok {
+		dlqGC := queue.NewGarbageCollector(dlqPurger, 1*time.Hour, 24*time.Hour)
+		go func() {
+			if err := dlqGC.Start(reloadCtx); err != nil && err != context.Canceled {
+				zapLogger.Error("dlq_garbage_collector_stopped_with_error", zap.Error(err))
+			}
+		}()
+		zapLogger.Info("started_dlq_garbage_collector",
+			zap.Duration("interval", 1*time.Hour),
+			zap.Duration("retention", 24*time.Hour),
+		)
+	}
 
 	// Start server in a goroutine
 	go func() {
@@ -340,7 +357,7 @@ func main() {
 	<-quit
 
 	zapLogger.Info("server_shutting_down")
-	corsCancel()
+	reloadCancel()
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
