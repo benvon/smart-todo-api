@@ -15,7 +15,7 @@
     "build:check": "npm run build"
   },
   "dependencies": {
-    "@actions/http-client": "^3.0.1",
+    "@actions/http-client": "^4.0.0",
     "chrono-node": "^2.7.8",
     "dayjs": "^1.11.13"
   },
