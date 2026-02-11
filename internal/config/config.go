@@ -23,6 +23,8 @@ type Config struct {
 	RabbitMQPrefetch int
 	WorkerDebugMode  bool
 	ServerDebugMode  bool
+	OTELEnabled      bool
+	OTELEndpoint     string
 }
 
 // Load loads configuration from environment variables
@@ -43,6 +45,8 @@ func Load() (*Config, error) {
 		RabbitMQPrefetch: getEnvInt("RABBITMQ_PREFETCH", 1),
 		WorkerDebugMode:  getEnvBool("WORKER_DEBUG_MODE", false),
 		ServerDebugMode:  getEnvBool("SERVER_DEBUG_MODE", false),
+		OTELEnabled:      getEnvBool("OTEL_ENABLED", false),
+		OTELEndpoint:     getEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

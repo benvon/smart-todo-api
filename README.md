@@ -348,6 +348,8 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduc
 | `OIDC_PROVIDER` | OIDC provider name to use | `cognito` | No |
 | `RABBITMQ_PREFETCH` | Number of unacknowledged messages per worker | `1` | No |
 | `DEBUG` | Enable debug logging | `false` | No |
+| `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` | No |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint | - | No (required if OTEL_ENABLED=true) |
 
 **Connection URL Formats:**
 
