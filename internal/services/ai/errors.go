@@ -139,10 +139,13 @@ func GetRetryDelay(err error, attempt int) time.Duration {
 	return capDuration(5*time.Second*time.Duration(1<<shift), 5*time.Minute)
 }
 
+// retryShiftValues maps attempt [0, 10] to shift values, avoiding int-to-uint conversion (G115).
+var retryShiftValues = []uint{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
 // retryShiftAmount caps attempt to [0, 20] and returns a shift in [0, 10] for exponential backoff.
 func retryShiftAmount(attempt int) uint {
 	if attempt < 0 {
-		attempt = 0
+		return 0
 	}
 	if attempt > 20 {
 		attempt = 20
@@ -150,7 +153,7 @@ func retryShiftAmount(attempt int) uint {
 	if attempt > 10 {
 		return 10
 	}
-	return uint(attempt)
+	return retryShiftValues[attempt]
 }
 
 func capDuration(d, max time.Duration) time.Duration {
