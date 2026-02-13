@@ -1,14 +1,14 @@
 module github.com/benvon/smart-todo
 
-go 1.25.6
+go 1.25.7
 
 require (
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/lestrrat-go/jwx/v2 v2.1.6
-	github.com/lib/pq v1.11.1
-	github.com/openai/openai-go/v3 v3.17.0
+	github.com/lib/pq v1.11.2
+	github.com/openai/openai-go/v3 v3.21.0
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.17.3
 	github.com/rs/cors v1.11.1
@@ -19,7 +19,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.33.0
 	go.opentelemetry.io/otel/sdk v1.33.0
 	go.uber.org/zap v1.27.1
-	golang.org/x/oauth2 v0.34.0
+	golang.org/x/oauth2 v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

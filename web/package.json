@@ -19,6 +19,9 @@
     "chrono-node": "^2.7.8",
     "dayjs": "^1.11.13"
   },
+  "overrides": {
+    "@isaacs/brace-expansion": "5.0.1"
+  },
   "devDependencies": {
     "@eslint/js": "^9.35.0",
     "@semantic-release/commit-analyzer": "^13.0.1",
