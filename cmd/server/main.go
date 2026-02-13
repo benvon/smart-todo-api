@@ -21,8 +21,10 @@ import (
 	"github.com/benvon/smart-todo/internal/queue"
 	"github.com/benvon/smart-todo/internal/services/ai"
 	"github.com/benvon/smart-todo/internal/services/oidc"
+	"github.com/benvon/smart-todo/internal/telemetry"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +60,36 @@ func main() {
 		zap.String("frontend_url", cfg.FrontendURL),
 		zap.String("ai_provider", cfg.AIProvider),
 		zap.String("ai_model", cfg.AIModel),
+		zap.Bool("otel_enabled", cfg.OTELEnabled),
 	)
+
+	// Initialize OpenTelemetry if enabled
+	var tracerProvider interface{ Shutdown(context.Context) error }
+	if cfg.OTELEnabled {
+		if cfg.OTELEndpoint == "" {
+			zapLogger.Warn("otel_enabled_but_endpoint_not_configured")
+		} else {
+			tp, err := telemetry.InitTracer(context.Background(), "smart-todo-api", cfg.OTELEndpoint)
+			if err != nil {
+				zapLogger.Warn("failed_to_initialize_otel_tracer", zap.Error(err))
+			} else {
+				tracerProvider = tp
+				zapLogger.Info("otel_tracer_initialized",
+					zap.String("endpoint", cfg.OTELEndpoint),
+				)
+				defer func() {
+					if tracerProvider == nil {
+						return
+					}
+					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer shutdownCancel()
+					if err := tracerProvider.Shutdown(shutdownCtx); err != nil {
+						zapLogger.Error("failed_to_shutdown_otel_tracer", zap.Error(err))
+					}
+				}()
+			}
+		}
+	}
 
 	// Connect to database
 	db, err := database.New(cfg.DatabaseURL)
@@ -226,6 +257,11 @@ func main() {
 	zapLogger.Info("setting_up_middleware")
 
 	// Outermost middleware (executes first):
+	// 0. OpenTelemetry tracing (if enabled)
+	if cfg.OTELEnabled && tracerProvider != nil {
+		r.Use(otelmux.Middleware("smart-todo-api"))
+		zapLogger.Info("otel_middleware_enabled")
+	}
 	// 1. Security headers (should be set on all responses)
 	r.Use(middleware.SecurityHeaders(cfg.EnableHSTS))
 	// 2. CORS (load from DB, hot-reload; fallback to FRONTEND_URL)
