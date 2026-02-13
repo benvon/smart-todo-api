@@ -78,6 +78,9 @@ func main() {
 					zap.String("endpoint", cfg.OTELEndpoint),
 				)
 				defer func() {
+					if tracerProvider == nil {
+						return
+					}
 					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer shutdownCancel()
 					if err := tracerProvider.Shutdown(shutdownCtx); err != nil {
@@ -283,7 +286,6 @@ func main() {
 	// 8. Logging (innermost, executes last before handler)
 	r.Use(middleware.Logging(zapLogger))
 	// 9. Activity tracking (for authenticated requests)
-	r.Use(middleware.ActivityTracking(activityRepo, zapLogger))
 	r.Use(middleware.ActivityTracking(activityRepo, zapLogger))
 
 	log.Println("Middleware setup complete")
