@@ -30,6 +30,7 @@ func InitTracer(ctx context.Context, serviceName, endpoint string) (*sdktrace.Tr
 		),
 	)
 	if err != nil {
+		_ = exporter.Shutdown(ctx)
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
