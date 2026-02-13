@@ -188,6 +188,7 @@ smart-todo/
 ├── web/                     # Frontend (Static PWA)
 └── docs/                    # Additional documentation
     ├── API.md               # API documentation
+    ├── DATA_MODEL.md        # Data model, isolation, and migrations
     ├── TESTING.md           # Testing guide
     └── QUEUE_SCALING.md     # Queue scaling guide
 ```
@@ -292,7 +293,7 @@ The frontend build system:
 
 #### Database Migrations
 
-The project uses [golang-migrate](https://github.com/golang-migrate/migrate) for database schema management. The `migrate` command-line tool must be installed (see Prerequisites section).
+The project uses [golang-migrate](https://github.com/golang-migrate/migrate) for database schema management. For table descriptions, user scoping (data isolation), and tag-statistics derivation, see [docs/DATA_MODEL.md](docs/DATA_MODEL.md). The `migrate` command-line tool must be installed (see Prerequisites section).
 
 ```bash
 # Create a new migration

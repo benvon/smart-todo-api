@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+// ErrTodoNotFound is returned when a todo is not found (e.g. by id or by user_id+id).
+var ErrTodoNotFound = errors.New("todo not found")
 
 const (
 	// MaxPageSize is the maximum page size for pagination queries
@@ -113,7 +117,7 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("todo not found: %w", err)
+		return nil, ErrTodoNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get todo: %w", err)
@@ -124,6 +128,59 @@ func (r *TodoRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Tod
 	}
 
 	// Initialize TagSources if nil
+	if todo.Metadata.TagSources == nil {
+		todo.Metadata.TagSources = make(map[string]models.TagSource)
+	}
+
+	if dueDate.Valid {
+		todo.DueDate = &dueDate.Time
+	}
+
+	if completedAt.Valid {
+		todo.CompletedAt = &completedAt.Time
+	}
+
+	return todo, nil
+}
+
+// GetByUserIDAndID retrieves a todo by user ID and todo ID. Enforces tenant scope at the DB layer.
+// Use this for request-scoped access instead of GetByID to prevent cross-user data access.
+func (r *TodoRepository) GetByUserIDAndID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*models.Todo, error) {
+	todo := &models.Todo{}
+	var metadataJSON []byte
+	var completedAt sql.NullTime
+	var dueDate sql.NullTime
+
+	query := `
+		SELECT id, user_id, text, time_horizon, status, metadata, due_date, created_at, updated_at, completed_at
+		FROM todos
+		WHERE user_id = $1 AND id = $2
+	`
+
+	err := r.db.QueryRowContext(ctx, query, userID, id).Scan(
+		&todo.ID,
+		&todo.UserID,
+		&todo.Text,
+		&todo.TimeHorizon,
+		&todo.Status,
+		&metadataJSON,
+		&dueDate,
+		&todo.CreatedAt,
+		&todo.UpdatedAt,
+		&completedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrTodoNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get todo: %w", err)
+	}
+
+	if err := json.Unmarshal(metadataJSON, &todo.Metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
 	if todo.Metadata.TagSources == nil {
 		todo.Metadata.TagSources = make(map[string]models.TagSource)
 	}
@@ -265,15 +322,15 @@ func (r *TodoRepository) Update(ctx context.Context, todo *models.Todo, oldTags 
 	query := `
 		UPDATE todos
 		SET text = $2, time_horizon = $3, status = $4, metadata = $5, due_date = $6, updated_at = $7, completed_at = $8
-		WHERE id = $1
+		WHERE id = $1 AND user_id = $9
 		RETURNING updated_at
 	`
 	err = r.db.QueryRowContext(ctx, query,
 		todo.ID, todo.Text, todo.TimeHorizon, todo.Status,
-		metadataJSON, dueDate, now, completedAt,
+		metadataJSON, dueDate, now, completedAt, todo.UserID,
 	).Scan(&todo.UpdatedAt)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("todo not found")
+		return ErrTodoNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("failed to update todo: %w", err)
@@ -381,11 +438,11 @@ func tagCountsEqual(a, b map[string]int) bool {
 	return true
 }
 
-// Delete deletes a todo by ID
-func (r *TodoRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `DELETE FROM todos WHERE id = $1`
+// Delete deletes a todo by user ID and todo ID. Enforces tenant scope at the DB layer.
+func (r *TodoRepository) Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+	query := `DELETE FROM todos WHERE id = $1 AND user_id = $2`
 
-	result, err := r.db.ExecContext(ctx, query, id)
+	result, err := r.db.ExecContext(ctx, query, id, userID)
 	if err != nil {
 		return fmt.Errorf("failed to delete todo: %w", err)
 	}
@@ -396,7 +453,7 @@ func (r *TodoRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	}
 
 	if rowsAffected == 0 {
-		return fmt.Errorf("todo not found")
+		return ErrTodoNotFound
 	}
 
 	return nil

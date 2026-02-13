@@ -77,13 +77,17 @@ var _ ai.AIProviderWithDueDate = (*mockAIProvider)(nil)
 type mockTodoRepo struct {
 	t                        *testing.T
 	getByIDFunc              func(ctx context.Context, id uuid.UUID) (*models.Todo, error)
+	getByUserIDAndIDFunc     func(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*models.Todo, error)
 	updateFunc               func(ctx context.Context, todo *models.Todo, oldTags []string) error
+	deleteFunc               func(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 	getByUserIDPaginatedFunc func(ctx context.Context, userID uuid.UUID, timeHorizon *models.TimeHorizon, status *models.TodoStatus, page, pageSize int) ([]*models.Todo, int, error)
 
 	// Call tracking (protected by mutex for concurrent access)
 	mu                        sync.Mutex
 	getByIDCalls              []uuid.UUID
+	getByUserIDAndIDCalls     []struct{ userID, id uuid.UUID }
 	updateCalls               []*models.Todo
+	deleteCalls               []struct{ userID, id uuid.UUID }
 	getByUserIDPaginatedCalls []struct {
 		userID         uuid.UUID
 		timeHorizon    *models.TimeHorizon
@@ -110,6 +114,30 @@ func (m *mockTodoRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Todo,
 		m.t.Fatal("GetByID called but not configured in test - mock requires explicit setup")
 	}
 	return m.getByIDFunc(ctx, id)
+}
+
+func (m *mockTodoRepo) GetByUserIDAndID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (*models.Todo, error) {
+	m.mu.Lock()
+	m.getByUserIDAndIDCalls = append(m.getByUserIDAndIDCalls, struct{ userID, id uuid.UUID }{userID, id})
+	m.mu.Unlock()
+	if m.getByUserIDAndIDFunc != nil {
+		return m.getByUserIDAndIDFunc(ctx, userID, id)
+	}
+	if m.getByIDFunc != nil {
+		return m.getByIDFunc(ctx, id)
+	}
+	m.t.Fatal("GetByUserIDAndID called but not configured in test - mock requires explicit setup")
+	return nil, nil
+}
+
+func (m *mockTodoRepo) Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
+	m.mu.Lock()
+	m.deleteCalls = append(m.deleteCalls, struct{ userID, id uuid.UUID }{userID, id})
+	m.mu.Unlock()
+	if m.deleteFunc == nil {
+		return nil
+	}
+	return m.deleteFunc(ctx, userID, id)
 }
 
 func (m *mockTodoRepo) Update(ctx context.Context, todo *models.Todo, oldTags []string) error {
@@ -385,8 +413,8 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				todoRepo := &mockTodoRepo{
-					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
-						return nil, errors.New("not found")
+					getByUserIDAndIDFunc: func(ctx context.Context, uid uuid.UUID, id uuid.UUID) (*models.Todo, error) {
+						return nil, database.ErrTodoNotFound
 					},
 				}
 				// Other mocks don't need configuration - error happens before they're called
@@ -404,12 +432,8 @@ func TestTaskAnalyzer_ProcessTaskAnalysisJob(t *testing.T) {
 			},
 			setupMocks: func() (*mockAIProvider, *mockTodoRepo, *mockAIContextRepo, *mockUserActivityRepo, *mockJobQueue) {
 				todoRepo := &mockTodoRepo{
-					getByIDFunc: func(ctx context.Context, id uuid.UUID) (*models.Todo, error) {
-						return &models.Todo{
-							ID:     id,
-							UserID: uuid.New(), // Different user
-							Text:   "Test todo",
-						}, nil
+					getByUserIDAndIDFunc: func(ctx context.Context, uid uuid.UUID, id uuid.UUID) (*models.Todo, error) {
+						return nil, database.ErrTodoNotFound
 					},
 				}
 				// Other mocks don't need configuration - error happens before they're called

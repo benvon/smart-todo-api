@@ -149,14 +149,11 @@ func (a *TaskAnalyzer) ProcessTaskAnalysisJob(ctx context.Context, job *queue.Jo
 	if job.TodoID == nil {
 		return fmt.Errorf("todo_id is required for task analysis job")
 	}
-	todo, err := a.todoRepo.GetByID(ctx, *job.TodoID)
+	todo, err := a.todoRepo.GetByUserIDAndID(ctx, job.UserID, *job.TodoID)
 	if err != nil {
 		return fmt.Errorf("failed to get todo: %w", err)
 	}
 	originalTags := todo.Metadata.CategoryTags
-	if todo.UserID != job.UserID {
-		return fmt.Errorf("todo does not belong to user")
-	}
 	userContext, _ := a.contextRepo.GetByUserID(ctx, job.UserID)
 	tagStats, _ := a.getTagStatistics(ctx, job.UserID)
 	if a.shouldSkipAnalysisForPausedUser(ctx, job.UserID) {

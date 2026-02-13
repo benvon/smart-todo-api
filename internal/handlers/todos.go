@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -335,15 +336,9 @@ func (h *TodoHandler) GetTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	todo, err := h.todoRepo.GetByID(ctx, id)
+	todo, err := h.todoRepo.GetByUserIDAndID(ctx, user.ID, id)
 	if err != nil {
 		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
-		return
-	}
-
-	// Verify todo belongs to user
-	if todo.UserID != user.ID {
-		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
 		return
 	}
 
@@ -453,13 +448,9 @@ func (h *TodoHandler) UpdateTodo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	todo, err := h.todoRepo.GetByID(ctx, id)
+	todo, err := h.todoRepo.GetByUserIDAndID(ctx, user.ID, id)
 	if err != nil {
 		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
-		return
-	}
-	if todo.UserID != user.ID {
-		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
 		return
 	}
 	oldTags := todo.Metadata.CategoryTags
@@ -499,19 +490,11 @@ func (h *TodoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	todo, err := h.todoRepo.GetByID(ctx, id)
-	if err != nil {
-		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
-		return
-	}
-
-	// Verify todo belongs to user
-	if todo.UserID != user.ID {
-		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
-		return
-	}
-
-	if err := h.todoRepo.Delete(ctx, id); err != nil {
+	if err := h.todoRepo.Delete(ctx, user.ID, id); err != nil {
+		if errors.Is(err, database.ErrTodoNotFound) {
+			respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
+			return
+		}
 		respondJSONError(w, http.StatusInternalServerError, "Internal Server Error", "Failed to delete todo")
 		return
 	}
@@ -535,15 +518,9 @@ func (h *TodoHandler) CompleteTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	todo, err := h.todoRepo.GetByID(ctx, id)
+	todo, err := h.todoRepo.GetByUserIDAndID(ctx, user.ID, id)
 	if err != nil {
 		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
-		return
-	}
-
-	// Verify todo belongs to user
-	if todo.UserID != user.ID {
-		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
 		return
 	}
 
@@ -579,15 +556,9 @@ func (h *TodoHandler) AnalyzeTodo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	todo, err := h.todoRepo.GetByID(ctx, id)
+	todo, err := h.todoRepo.GetByUserIDAndID(ctx, user.ID, id)
 	if err != nil {
 		respondJSONError(w, http.StatusNotFound, "Not Found", "Todo not found")
-		return
-	}
-
-	// Verify todo belongs to user
-	if todo.UserID != user.ID {
-		respondJSONError(w, http.StatusForbidden, "Forbidden", "Todo does not belong to user")
 		return
 	}
 
