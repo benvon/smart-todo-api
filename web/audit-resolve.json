@@ -45,6 +45,21 @@
       "decision": "ignore",
       "madeAt": 1738108800000,
       "reason": "Vulnerability in tar package (GHSA-34x7-hfp2-rc4v) via npm transitive dependency chain. tar is only used during CI/CD package installation and release processes, not at runtime. These are dev dependencies used only by semantic-release tooling during build/release."
+    },
+    "1115543|brace-expansion": {
+      "decision": "ignore",
+      "madeAt": 1775001250000,
+      "reason": "Vulnerability in brace-expansion (GHSA-f886-m6hf-6m8v) is from npm's bundled dependency tree via @semantic-release/npm. This project does not use npm's internal glob parser at runtime; it is only used in CI/release tooling. npm@11.12.1 is the current latest release and still includes this advisory."
+    },
+    "1115551|picomatch": {
+      "decision": "ignore",
+      "madeAt": 1775001250000,
+      "reason": "Vulnerability in picomatch (GHSA-3v7f-55p6-f55p) is from npm's bundled tinyglobby dependency via @semantic-release/npm. The affected path is dev-only release tooling and is not part of production runtime. npm@11.12.1 is the current latest release and still includes this advisory."
+    },
+    "1115554|picomatch": {
+      "decision": "ignore",
+      "madeAt": 1775001250000,
+      "reason": "Vulnerability in picomatch (GHSA-c2c7-rcm5-vvqj) is from npm's bundled tinyglobby dependency via @semantic-release/npm. The affected path is dev-only release tooling and is not part of production runtime. npm@11.12.1 is the current latest release and still includes this advisory."
     }
   }
 }
