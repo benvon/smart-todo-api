@@ -38,7 +38,7 @@ jobs:
       run: go test -v -race -coverprofile=coverage.out ./...
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v6
       with:
         files: ./coverage.out
         flags: unittests
@@ -180,7 +180,7 @@ jobs:
       run: npm run test:coverage
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v6
       with:
         files: ./web/coverage/coverage-final.json
         flags: web-tests
