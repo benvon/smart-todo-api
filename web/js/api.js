@@ -229,7 +229,7 @@ async function getOIDCLoginConfig() {
         throw new Error('Invalid response format from server');
     } catch (error) {
         if (error instanceof TypeError && error.message.includes('fetch')) {
-            throw new Error(`Network error: Unable to reach server at ${window.API_BASE_URL}. Make sure the server is running.`);
+            throw new Error(`Network error: Unable to reach server at ${window.API_BASE_URL}. Make sure the server is running.`, { cause: error });
         }
         throw error;
     }
