@@ -14,10 +14,10 @@ require (
 	github.com/rs/cors v1.11.1
 	github.com/spf13/cobra v1.10.2
 	github.com/ulule/limiter/v3 v3.11.2
-	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.65.0
-	go.opentelemetry.io/otel v1.40.0
+	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.67.0
+	go.opentelemetry.io/otel v1.42.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.40.0
-	go.opentelemetry.io/otel/sdk v1.40.0
+	go.opentelemetry.io/otel/sdk v1.42.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/oauth2 v0.35.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -52,8 +52,8 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.40.0 // indirect
-	go.opentelemetry.io/otel/metric v1.40.0 // indirect
-	go.opentelemetry.io/otel/trace v1.40.0 // indirect
+	go.opentelemetry.io/otel/metric v1.42.0 // indirect
+	go.opentelemetry.io/otel/trace v1.42.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
