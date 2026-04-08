@@ -3,7 +3,7 @@ module github.com/benvon/smart-todo
 go 1.25.8
 
 require (
-	github.com/go-playground/validator/v10 v10.30.1
+	github.com/go-playground/validator/v10 v10.30.2
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/lestrrat-go/jwx/v2 v2.1.6
