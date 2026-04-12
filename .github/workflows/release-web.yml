@@ -83,7 +83,7 @@ jobs:
           wranglerVersion: "3"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ steps.package.outputs.package_file }}
           tag_name: ${{ github.ref_name }}
