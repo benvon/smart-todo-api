@@ -1,6 +1,6 @@
 module github.com/benvon/smart-todo
 
-go 1.25.8
+go 1.25.9
 
 require (
 	github.com/go-playground/validator/v10 v10.30.1
