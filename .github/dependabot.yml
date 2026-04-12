@@ -1,18 +1,23 @@
 # See https://docs.github.com/en/code-security/supply-chain-security/keeping-your-dependencies-updated-automatically/configuration-options-for-dependency-updates
 version: 2
+
+multi-ecosystem-groups:
+  all-dependencies:
+    schedule:
+      interval: "weekly"
+
 updates:
-  # Enable version updates for Go modules
   - package-ecosystem: "gomod"
     directory: "/"
-    schedule:
-      interval: "weekly"
-  # Enable version updates for GitHub Actions
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
+
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
-  # Enable version updates for npm packages
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
+
   - package-ecosystem: "npm"
     directory: "/web"
-    schedule:
-      interval: "weekly"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
