@@ -1,0 +1,27 @@
+name: release-tag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Semver bump to apply when running manually
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release-tag:
+    uses: benvon/reusable-workflows/.github/workflows/release-tag.yml@0a878c63c5a17372ecd27a1fd1fffd7c1b88e5d3
+    with:
+      caller_event_name: ${{ github.event_name }}
+      caller_sha: ${{ github.sha }}
+      manual_release_type: ${{ github.event.inputs.release_type || '' }}
