@@ -1,0 +1,16 @@
+name: release-policy
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  release-policy:
+    uses: benvon/reusable-workflows/.github/workflows/release-policy.yml@0a878c63c5a17372ecd27a1fd1fffd7c1b88e5d3
+    with:
+      pull_request_number: ${{ github.event.pull_request.number }}
