@@ -509,6 +509,21 @@ The build output will be in `web/dist/`:
 
 Kubernetes manifests are available in the `k8s/` directory. See the individual files for deployment instructions.
 
+**Probe follow-up (homelab, 2026-08):** `k8s/server-deployment.yaml` currently probes plain `/healthz`, which stays green when Postgres is down. Prefer dependency-aware probes so Kubernetes recycles the pod instead of serving a wedged API:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz?mode=extended
+    port: http
+readinessProbe:
+  httpGet:
+    path: /healthz?mode=extended
+    port: http
+```
+
+Same class of issue as n8n’s `/healthz` vs `/healthz/readiness` split: process-up checks are not enough when the datastore or Redis is unreachable. Local `docker-compose.yml` Redis healthchecks should also AUTH if the Redis instance uses ACL/`requirepass` (anonymous `redis-cli ping` will report unhealthy forever).
+
 ### Health Checks
 
 The `/healthz` endpoint provides health check functionality:
@@ -519,13 +534,15 @@ The `/healthz` endpoint provides health check functionality:
 curl http://localhost:8080/healthz
 ```
 
+Returns process liveness only — fine for a quick smoke test, **not** sufficient for Kubernetes readiness/liveness if you care about DB connectivity.
+
 **Extended Mode:**
 
 ```bash
 curl http://localhost:8080/healthz?mode=extended
 ```
 
-Extended mode checks database connectivity (5-second timeout). Health check endpoints are exempt from rate limiting.
+Extended mode checks database connectivity (5-second timeout). Health check endpoints are exempt from rate limiting. **Use this mode for cluster probes** (see Kubernetes note above).
 
 ### Troubleshooting
 
