@@ -40,7 +40,7 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 - [ ] New and existing unit tests pass locally with my changes
 - [ ] Any dependent changes have been merged and published in downstream modules
 - [ ] I have run `go mod tidy` and `go mod vendor` if applicable
-- [ ] I have run `golangci-lint run` and fixed any issues
+- [ ] I have run `make lint` and fixed any issues
 - [ ] I have updated the changelog (if applicable)
 
 ## Screenshots (if applicable)

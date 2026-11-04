@@ -1,0 +1,75 @@
+name: migration-quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  migration-quality:
+    name: migration-quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out candidate source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up the supported migration toolchain
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.27.3'
+          check-latest: false
+          cache: false
+
+      - name: Check helper module and shell contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          go version
+          go -C tools/migrate mod download
+          go -C tools/migrate mod verify
+          go -C tools/migrate test -race ./...
+          go -C tools/migrate vet ./...
+          bash -n scripts/run_migrations.sh scripts/tests/test_run_migrations.sh scripts/tests/test_migration_image.sh
+          shellcheck --version
+          shellcheck scripts/run_migrations.sh scripts/tests/test_run_migrations.sh scripts/tests/test_migration_image.sh
+          bash scripts/tests/test_run_migrations.sh
+
+      - name: Scan the isolated helper module
+        working-directory: tools/migrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          go tool -modfile="$GITHUB_WORKSPACE/tools/quality/go.mod" govulncheck ./...
+
+      - name: Build the local amd64 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 --file server.Dockerfile --tag smart-todo-migration-test:ci .
+          docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' smart-todo-migration-test:ci
+
+      - name: Exercise the actual packaged migration entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/tests/test_migration_image.sh smart-todo-migration-test:ci
+
+      - name: Scan the exact packaged helper binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate=$(docker create smart-todo-migration-test:ci)
+          trap 'docker rm "$candidate" >/dev/null' EXIT
+          docker cp "$candidate:/app/migrate" "$RUNNER_TEMP/migration-helper"
+          go version -m "$RUNNER_TEMP/migration-helper"
+          go tool -modfile=tools/quality/go.mod govulncheck -mode=binary "$RUNNER_TEMP/migration-helper"

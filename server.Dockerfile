@@ -1,5 +1,5 @@
 # Builder stage
-FROM golang:1.25.9-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 WORKDIR /app
 COPY go.mod go.sum ./
@@ -8,7 +8,9 @@ COPY . .
 RUN mkdir -p /app/bin && \
     go build -o /app/bin/server-linux-amd64 ./cmd/server && \
     go build -o /app/bin/configure-linux-amd64 ./cmd/configure && \
-    GOBIN=/app go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+    go -C tools/migrate mod download && \
+    go -C tools/migrate mod verify && \
+    go -C tools/migrate build -o /app/migrate .
 
 # Final stage
 FROM ubuntu:24.04 AS runner

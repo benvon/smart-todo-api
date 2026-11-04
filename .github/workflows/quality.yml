@@ -11,12 +11,31 @@ permissions:
 
 jobs:
   quality:
-    uses: benvon/reusable-workflows/.github/workflows/go-quality.yml@f70796de0a6527dbed267a64835c3cc81b8144e0
-    with:
-      quality_command: |
-        make deps test lint security vulnerability-check mod-tidy-check
-        go build -v -o /dev/null ./cmd/server
-        go build -v -o /dev/null ./cmd/configure
+    name: quality / quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/quality/go.sum
+
+      - name: Verify Go-managed quality tools
+        run: make setup
+
+      - name: Run quality checks
+        run: |
+          set -euo pipefail
+          make deps test lint security vulnerability-check mod-tidy-check
+          go build -v -o /dev/null ./cmd/server
+          go build -v -o /dev/null ./cmd/configure
 
   cross-build:
     name: cross-build

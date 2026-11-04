@@ -27,29 +27,8 @@ echo -e "${GREEN}Found Go version: ${GO_VERSION}${NC}"
 # Check if required tools are installed
 echo -e "${YELLOW}Checking required development tools...${NC}"
 
-# Install golangci-lint if not present
-if ! command -v golangci-lint &> /dev/null; then
-    echo -e "${YELLOW}Installing golangci-lint...${NC}"
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
-else
-    echo -e "${GREEN}golangci-lint is already installed${NC}"
-fi
-
-# Install govulncheck if not present
-if ! command -v govulncheck &> /dev/null; then
-    echo -e "${YELLOW}Installing govulncheck...${NC}"
-    go install golang.org/x/vuln/cmd/govulncheck@latest
-else
-    echo -e "${GREEN}govulncheck is already installed${NC}"
-fi
-
-# Install gosec if not present
-if ! command -v gosec &> /dev/null; then
-    echo -e "${YELLOW}Installing gosec...${NC}"
-    go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
-else
-    echo -e "${GREEN}gosec is already installed${NC}"
-fi
+# Resolve and verify the repository-pinned Go tools.
+make setup
 
 # Install pre-commit if not present
 if ! command -v pre-commit &> /dev/null; then
@@ -94,11 +73,7 @@ go test ./...
 
 # Run initial linting
 echo -e "${YELLOW}Running initial linting...${NC}"
-if command -v golangci-lint &> /dev/null; then
-    golangci-lint run
-else
-    echo -e "${YELLOW}Skipping linting (golangci-lint not found)${NC}"
-fi
+make lint
 
 echo -e "${GREEN}Setup completed successfully!${NC}"
 echo -e "${YELLOW}Next steps:${NC}"
