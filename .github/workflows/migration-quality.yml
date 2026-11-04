@@ -49,8 +49,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          GOBIN="$RUNNER_TEMP/migration-tools" go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
-          "$RUNNER_TEMP/migration-tools/govulncheck" ./...
+          go tool -modfile="$GITHUB_WORKSPACE/tools/quality/go.mod" govulncheck ./...
 
       - name: Build the local amd64 candidate
         shell: bash
@@ -73,4 +72,4 @@ jobs:
           trap 'docker rm "$candidate" >/dev/null' EXIT
           docker cp "$candidate:/app/migrate" "$RUNNER_TEMP/migration-helper"
           go version -m "$RUNNER_TEMP/migration-helper"
-          "$RUNNER_TEMP/migration-tools/govulncheck" -mode=binary "$RUNNER_TEMP/migration-helper"
+          go tool -modfile=tools/quality/go.mod govulncheck -mode=binary "$RUNNER_TEMP/migration-helper"

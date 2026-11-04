@@ -15,10 +15,9 @@ The frontend uses a modern build system with npm and esbuild. All JavaScript fil
 - `eslint` - JavaScript linter and code quality tool
 - `@eslint/js` - ESLint JavaScript configuration
 - `c8` - Native Node.js test coverage tool
-- `semantic-release` - Automated version management and releases
-- `@semantic-release/commit-analyzer` - Analyzes commits for semantic versioning
-- `@semantic-release/release-notes-generator` - Generates release notes
-- `@semantic-release/github` - GitHub release integration
+
+The tag-driven release workflow packages the frontend directly; it does not use semantic-release.
+The `glob` and `minimatch` overrides keep the coverage and lint dependency trees on patched versions.
 
 ### Building
 
