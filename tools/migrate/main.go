@@ -34,6 +34,9 @@ func run(args []string, out io.Writer) (status int) {
 	defer cancel()
 	session, err := openSession(ctx, os.Getenv("DATABASE_URL"), budget)
 	if err != nil {
+		if errors.Is(err, errUnsupportedOption) {
+			return report(out, "error=unsupported_option", 1)
+		}
 		return report(out, "error=database", failureStatus(err))
 	}
 	finishCancellation := session.finishCancellation
@@ -41,12 +44,28 @@ func run(args []string, out io.Writer) (status int) {
 	defer func() {
 		cancelErr := finishCancellation()
 		closeErr := session.close(m)
-		if cancelErr != nil || closeErr != nil || ctx.Err() != nil {
-			status = report(out, "error=session_unconfirmed_or_cancelled", 1)
+		if cancelErr != nil || closeErr != nil {
+			status = report(out, "error=session_unconfirmed", 1)
+		} else if ctx.Err() != nil {
+			status = 1
+			if args[0] == "version" {
+				status = failureStatus(ctx.Err())
+			}
+			status = report(out, "error=cancelled session_stopped=true", status)
 		}
 	}()
 	if err != nil {
 		return report(out, "error=configuration", 1)
+	}
+	stopGraceful := context.AfterFunc(ctx, func() {
+		select {
+		case m.GracefulStop <- true:
+		default:
+		}
+	})
+	defer stopGraceful()
+	if err := ctx.Err(); err != nil {
+		return report(out, "error=cancelled", failureStatus(err))
 	}
 	if args[0] == "version" {
 		return version(m, out)
@@ -79,12 +98,21 @@ func report(out io.Writer, message string, status int) int {
 }
 
 func failureStatus(err error) int {
+	if errors.Is(err, errSessionUnconfirmed) {
+		return 1
+	}
+	if errors.Is(err, context.Canceled) {
+		return 1
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 2
+	}
 	var networkErr *net.OpError
 	if errors.As(err, &networkErr) {
 		return 2
 	}
 	var postgresErr *pq.Error
-	if errors.As(err, &postgresErr) && (postgresErr.Code.Class() == "08" || postgresErr.Code == "57P03") {
+	if errors.As(err, &postgresErr) && (postgresErr.Code.Class() == "08" || postgresErr.Code == "57P03" || postgresErr.Code == "57014") {
 		return 2
 	}
 	return 1

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/url"
 	"testing"
 	"time"
@@ -32,6 +33,16 @@ func TestConnectionOptionsRejectInvalidInput(t *testing.T) {
 	for _, raw := range []string{"", "mysql://fake/fake", "postgres://fake/fake?sslmode=%invalid", "postgres://fake/fake?x-multi-statement=invalid"} {
 		if _, _, err := connectionOptions(raw, "helper-test", time.Second); err == nil {
 			t.Fatal("invalid input accepted")
+		}
+	}
+}
+
+func TestUnsupportedMigrationOptionsFailBeforeConnection(t *testing.T) {
+	t.Parallel()
+	for _, option := range []string{"x-multi-statement=true", "x-multi-statement=1", "x-multi-statement=invalid", "x-unknown-option=value"} {
+		_, _, err := connectionOptions("postgres://fake:fake@invalid.example/fake?"+option, "helper-test", time.Second)
+		if !errors.Is(err, errUnsupportedOption) {
+			t.Fatalf("option %s: got %v, want unsupported option", option, err)
 		}
 	}
 }
