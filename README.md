@@ -293,6 +293,8 @@ The frontend build system:
 
 #### Database Migrations
 
+For CI release packaging, mandatory QA, online upgrade compatibility and the GitOps database handoff, see [docs/RELEASING.md](docs/RELEASING.md).
+
 The project uses [golang-migrate](https://github.com/golang-migrate/migrate) for database schema management. For table descriptions, user scoping (data isolation), and tag-statistics derivation, see [docs/DATA_MODEL.md](docs/DATA_MODEL.md). The `migrate` command-line tool must be installed (see Prerequisites section).
 
 ```bash

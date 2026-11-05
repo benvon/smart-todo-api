@@ -21,8 +21,11 @@ import (
 func main() { os.Exit(run(os.Args[1:], os.Stdout)) }
 
 func run(args []string, out io.Writer) (status int) {
-	if len(args) != 1 || (args[0] != "version" && args[0] != "up") {
+	if len(args) != 1 || (args[0] != "version" && args[0] != "up" && args[0] != "inspect") {
 		return report(out, "error=usage", 1)
+	}
+	if args[0] == "inspect" {
+		return runInspection(out)
 	}
 	budget := 90 * time.Second
 	if args[0] == "version" {

@@ -83,3 +83,7 @@ web/node_modules/
 
 # AI assistant config
 .claude/
+
+# Generated, revision-bound release instructions and Python test caches
+release/contract.json
+__pycache__/

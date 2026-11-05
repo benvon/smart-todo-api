@@ -1,12 +1,14 @@
 # Builder stage
 FROM golang:1.27.3-alpine AS builder
 
+ENV CGO_ENABLED=0
+
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download && go mod verify && go mod tidy && go mod vendor
+RUN go mod download && go mod verify
 COPY . .
 RUN mkdir -p /app/bin && \
-    go build -o /app/bin/worker-linux-amd64 ./cmd/worker
+    go build -mod=readonly -o /app/bin/worker-linux-amd64 ./cmd/worker
 
 # Final stage
 FROM ubuntu:24.04 AS runner

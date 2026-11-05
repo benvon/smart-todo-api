@@ -41,7 +41,7 @@ func TestFailureStatus(t *testing.T) {
 
 func TestInvalidInputIsSanitized(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://fake_user:fake_password@%invalid/fake")
-	for _, args := range [][]string{{}, {"force"}, {"version"}} {
+	for _, args := range [][]string{{}, {"force"}, {"version"}, {"inspect"}} {
 		var out bytes.Buffer
 		if status := run(args, &out); status != 1 {
 			t.Fatalf("status=%d", status)

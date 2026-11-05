@@ -223,6 +223,8 @@ dockers_v2:
       - internal/
       - api/
       - scripts/
+      - release/
+      - tools/migrate/
     images:
       - "ghcr.io/{{ .Env.GITHUB_REPOSITORY_OWNER }}/{{ .ProjectName }}-server"
     tags:

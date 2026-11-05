@@ -1,5 +1,14 @@
 # AI Agent Instructions
 
+## CI release and online database changes
+
+* Follow [docs/RELEASING.md](docs/RELEASING.md) for mandatory QA and release handoff.
+* Mandatory QA must pass on the exact source revision before release creation. Keep workflow changes local until stabilized.
+* Preserve N−1 → N migration and API/worker overlap; design for meaningful N+1 compatibility. Never rewrite applied migrations.
+* Use expand → transition → contract; account for concurrent writes in backfills and retire consumers/rollback support before destructive cleanup.
+* Update PostgreSQL overlap fixtures and bounded read-only SQL invariants for affected behavior. Record representative load/locking evidence in development, CI or pre-production when relevant.
+* CD consumes digest references and finite migration/validation instructions. Do not add production QA grading, load/soak phases, prerequisite-deployment health gates or automatic rollback.
+
 ## General Guidelines
 
 * Focus on "why" and not "how" in documentation.

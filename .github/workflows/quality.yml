@@ -1,6 +1,11 @@
 name: quality
 
 on:
+  workflow_call:
+    outputs:
+      qa-artifact-name:
+        description: QA artifact name from the successful producer attempt
+        value: ${{ jobs.mandatory-qa.outputs.artifact-name }}
   pull_request:
     branches: [main]
   push:
@@ -58,7 +63,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for target in ./cmd/server ./cmd/configure; do
+          for target in ./cmd/server ./cmd/configure ./cmd/worker ./cmd/db-release; do
             for goos in linux darwin windows; do
               for goarch in amd64 arm64; do
                 if [[ "${goos}" == "windows" && "${goarch}" == "arm64" ]]; then
@@ -109,3 +114,111 @@ jobs:
 
       - name: Verify package-lock sync
         run: npm ci --dry-run
+
+  database-compatibility:
+    name: database-compatibility
+    outputs:
+      artifact-name: ${{ steps.contract.outputs.artifact-name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-test-only
+          POSTGRES_DB: ci_release
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci_release"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://ci:ci-test-only@localhost:5432/ci_release?sslmode=disable&connect_timeout=5&options=-c%20statement_timeout%3D10000%20-c%20lock_timeout%3D2000
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test release input policy
+        run: python3 -m unittest discover -s scripts -p test_ci_release.py
+      - name: Select and verify previous published stable release
+        id: contract
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
+          python3 scripts/ci_release.py prepare --releases "$RUNNER_TEMP/releases.json" --ref "$RELEASE_REF" --output "$RUNNER_TEMP/contract.json"
+          echo "artifact-name=database-contract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - name: Build migration runner and both application compatibility fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/previous"
+          go build -mod=readonly -o "$RUNNER_TEMP/bin/db-release" ./cmd/db-release
+          go build -mod=readonly -o "$RUNNER_TEMP/bin/compat-new" ./scripts/compatibility
+          PREVIOUS=$(jq -r .previous_revision "$RUNNER_TEMP/contract.json")
+          git archive "$PREVIOUS" | tar -x -C "$RUNNER_TEMP/previous"
+          mkdir -p "$RUNNER_TEMP/previous/cmd/ci-compat"
+          cp scripts/compatibility/main.go "$RUNNER_TEMP/previous/cmd/ci-compat/main.go"
+          cd "$RUNNER_TEMP/previous"
+          go build -mod=readonly -o "$RUNNER_TEMP/bin/compat-old" ./cmd/ci-compat
+      - name: Exercise real PostgreSQL migration and application overlap
+        run: |
+          python3 scripts/ci_database.py \
+            --previous "$RUNNER_TEMP/previous" --migrate-source tools/migrate \
+            --runner "$RUNNER_TEMP/bin/db-release" --old-binary "$RUNNER_TEMP/bin/compat-old" \
+            --new-binary "$RUNNER_TEMP/bin/compat-new" --contract "$RUNNER_TEMP/contract.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.contract.outputs.artifact-name }}
+          path: ${{ runner.temp }}/contract.json
+          if-no-files-found: error
+
+  migration-safety:
+    uses: ./.github/workflows/migration-quality.yml
+
+  mandatory-qa:
+    name: mandatory-qa
+    outputs:
+      artifact-name: ${{ steps.evidence.outputs.artifact-name }}
+    if: always()
+    needs: [quality, cross-build, web-quality, database-compatibility, migration-safety]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all mandatory results
+        env:
+          QA_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$QA_RESULTS" | jq -e 'length == 5 and all(.[]; .result == "success")'
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.database-compatibility.outputs.artifact-name }}
+          path: qa
+      - name: Record exact-revision maintainer QA evidence
+        id: evidence
+        env:
+          QA_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          contract = json.loads(Path('qa/contract.json').read_text())
+          if contract['source_revision'] != revision:
+              raise SystemExit('QA contract revision mismatch')
+          evidence = {'source_revision': revision, 'result': 'success',
+                      'url': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}/attempts/{os.environ['GITHUB_RUN_ATTEMPT']}",
+                      'mandatory_checks': json.loads(os.environ['QA_RESULTS'])}
+          Path('qa/qa.json').write_text(json.dumps(evidence, indent=2) + '\n')
+          PY
+          echo "artifact-name=release-qa-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.evidence.outputs.artifact-name }}
+          path: qa/*.json
+          if-no-files-found: error

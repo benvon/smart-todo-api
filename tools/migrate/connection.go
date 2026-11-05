@@ -29,6 +29,8 @@ func sessionFailure(primary error, cleanup ...error) error {
 
 type migrationSession struct {
 	driver             database.Driver
+	conn               *sql.Conn
+	table              migrationTable
 	db                 *sql.DB
 	control            *sql.DB
 	pid                int
@@ -90,10 +92,11 @@ func connectionOptions(raw, name string, budget time.Duration) (string, *postgre
 			config.MultiStatementMaxSize = size
 		}
 	}
-	table := config.MigrationsTable
-	if config.MigrationsTableQuoted && table != "" && (table[0] != '"' || table[len(table)-1] != '"') {
-		return "", nil, errors.New("invalid quoted migration table")
+	table, err := configuredTable(config.MigrationsTable, config.MigrationsTableQuoted)
+	if err != nil {
+		return "", nil, err
 	}
+	config.SchemaName, config.MigrationsTable, config.MigrationsTableQuoted = table.schema, table.name, false
 	query.Set("application_name", name)
 	query.Set("statement_timeout", strconv.FormatInt(budget.Milliseconds(), 10))
 	query.Set("connect_timeout", "2")
@@ -102,6 +105,10 @@ func connectionOptions(raw, name string, budget time.Duration) (string, *postgre
 }
 
 func openSession(ctx context.Context, raw string, budget time.Duration) (*migrationSession, error) {
+	return openSessionMode(ctx, raw, budget, true)
+}
+
+func openSessionMode(ctx context.Context, raw string, budget time.Duration, initialize bool) (*migrationSession, error) {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return nil, err
@@ -119,7 +126,7 @@ func openSession(ctx context.Context, raw string, budget time.Duration) (*migrat
 	if err != nil {
 		return nil, sessionFailure(err, db.Close())
 	}
-	session := &migrationSession{db: db, name: name}
+	session := &migrationSession{db: db, conn: conn, name: name}
 	err = conn.QueryRowContext(ctx, "SELECT pg_backend_pid(), backend_start FROM pg_stat_activity WHERE pid=pg_backend_pid()").Scan(&session.pid, &session.started)
 	if err != nil {
 		return nil, sessionFailure(err, conn.Close(), db.Close())
@@ -132,6 +139,12 @@ func openSession(ctx context.Context, raw string, budget time.Duration) (*migrat
 		return nil, sessionFailure(err, conn.Close(), db.Close())
 	}
 	session.finishCancellation = session.watch(ctx)
+	if err := session.resolveTable(ctx, config); err != nil {
+		return nil, sessionFailure(err, session.finishCancellation(), session.close(nil))
+	}
+	if !initialize {
+		return session, nil
+	}
 	session.driver, err = postgres.WithConnection(ctx, conn, config)
 	if err != nil {
 		cancelErr := session.finishCancellation()
@@ -139,6 +152,21 @@ func openSession(ctx context.Context, raw string, budget time.Duration) (*migrat
 	}
 	session.driver = &guardedDriver{Driver: session.driver, ctx: ctx}
 	return session, nil
+}
+
+func (s *migrationSession) resolveTable(ctx context.Context, config *postgres.Config) error {
+	if config.SchemaName == "" {
+		var schema sql.NullString
+		if err := s.conn.QueryRowContext(ctx, "SELECT CURRENT_SCHEMA()").Scan(&schema); err != nil {
+			return err
+		}
+		if !schema.Valid {
+			return errors.New("migration schema unavailable")
+		}
+		config.SchemaName = schema.String
+	}
+	s.table = migrationTable{schema: config.SchemaName, name: config.MigrationsTable}
+	return nil
 }
 
 // Cancellation targets the captured identity of this helper's dedicated
@@ -189,8 +217,10 @@ func (s *migrationSession) close(m *migrate.Migrate) error {
 	if m != nil {
 		sourceErr, dbErr := m.Close()
 		migrationErr = errors.Join(sourceErr, dbErr)
-	} else {
+	} else if s.driver != nil {
 		migrationErr = s.driver.Close()
+	} else {
+		migrationErr = s.conn.Close()
 	}
 	closeErr := s.db.Close()
 	verifyErr := s.verifyStopped()
