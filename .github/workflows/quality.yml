@@ -2,6 +2,10 @@ name: quality
 
 on:
   workflow_call:
+    outputs:
+      qa-artifact-name:
+        description: QA artifact name from the successful producer attempt
+        value: ${{ jobs.mandatory-qa.outputs.artifact-name }}
   pull_request:
     branches: [main]
   push:
@@ -113,6 +117,8 @@ jobs:
 
   database-compatibility:
     name: database-compatibility
+    outputs:
+      artifact-name: ${{ steps.contract.outputs.artifact-name }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -140,12 +146,14 @@ jobs:
       - name: Test release input policy
         run: python3 -m unittest discover -s scripts -p test_ci_release.py
       - name: Select and verify previous published stable release
+        id: contract
         env:
           RELEASE_REF: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp > "$RUNNER_TEMP/releases.json"
           python3 scripts/ci_release.py prepare --releases "$RUNNER_TEMP/releases.json" --ref "$RELEASE_REF" --output "$RUNNER_TEMP/contract.json"
+          echo "artifact-name=database-contract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - name: Build migration runner and both application compatibility fixtures
         run: |
           set -euo pipefail
@@ -166,7 +174,7 @@ jobs:
             --new-binary "$RUNNER_TEMP/bin/compat-new" --contract "$RUNNER_TEMP/contract.json"
       - uses: actions/upload-artifact@v4
         with:
-          name: database-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.contract.outputs.artifact-name }}
           path: ${{ runner.temp }}/contract.json
           if-no-files-found: error
 
@@ -175,6 +183,8 @@ jobs:
 
   mandatory-qa:
     name: mandatory-qa
+    outputs:
+      artifact-name: ${{ steps.evidence.outputs.artifact-name }}
     if: always()
     needs: [quality, cross-build, web-quality, database-compatibility, migration-safety]
     runs-on: ubuntu-latest
@@ -187,9 +197,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
         with:
-          name: database-contract-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.database-compatibility.outputs.artifact-name }}
           path: qa
       - name: Record exact-revision maintainer QA evidence
+        id: evidence
         env:
           QA_RESULTS: ${{ toJSON(needs) }}
         run: |
@@ -205,8 +216,9 @@ jobs:
                       'mandatory_checks': json.loads(os.environ['QA_RESULTS'])}
           Path('qa/qa.json').write_text(json.dumps(evidence, indent=2) + '\n')
           PY
+          echo "artifact-name=release-qa-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-qa-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ steps.evidence.outputs.artifact-name }}
           path: qa/*.json
           if-no-files-found: error

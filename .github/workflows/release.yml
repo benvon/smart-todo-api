@@ -38,7 +38,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          name: release-qa-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ needs.qa.outputs.qa-artifact-name }}
           path: qa
       - name: Verify tested revision and prepare image instructions
         run: |
