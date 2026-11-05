@@ -14,7 +14,7 @@ import (
 func TestBoundedURL(t *testing.T) {
 	t.Parallel()
 	config := limits{Overall: 120, Statement: 10000, Lock: 2000, Connect: 5}
-	got, err := boundedURL("postgres://user:secret@example.test/db?sslmode=verify-full&options=unsafe&connect_timeout=99", config)
+	got, err := boundedURL("postgres://user:secret@example.test/db?sslmode=verify-full&options=-c%20search_path%3Dmigration_meta%2Cpublic&connect_timeout=99&statement_timeout=0&lock_timeout=0", config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,8 +25,11 @@ func TestBoundedURL(t *testing.T) {
 	if parsed.Query().Get("sslmode") != "verify-full" || parsed.Query().Get("connect_timeout") != "5" {
 		t.Fatal("connection security must be preserved and timeout enforced")
 	}
-	if parsed.Query().Get("options") != "-c statement_timeout=10000 -c lock_timeout=2000" {
+	if parsed.Query().Get("options") != "-c search_path=migration_meta,public -c statement_timeout=10000 -c lock_timeout=2000" {
 		t.Fatal("statement and lock limits not enforced")
+	}
+	if parsed.Query().Get("statement_timeout") != "10000" || parsed.Query().Get("lock_timeout") != "2000" {
+		t.Fatal("explicit startup parameters must not override configured limits")
 	}
 	for _, input := range []string{"", "host=example.test password=secret", "https://example.test/db"} {
 		if _, err := boundedURL(input, config); err == nil {
@@ -106,6 +109,36 @@ func TestLimitsFailClosed(t *testing.T) {
 		mutate(&config)
 		if config.validate() == nil {
 			t.Errorf("accepted unsafe limits: %+v", config)
+		}
+	}
+}
+
+func TestMigrationStateProtocol(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{
+		`{"format_version":1,"version":null,"dirty":false,"bootstrap":true}`,
+		`{"format_version":1,"version":12,"dirty":false,"bootstrap":false}`,
+		`{"format_version":1,"version":13,"dirty":true,"bootstrap":false}`,
+	} {
+		if _, err := decodeMigrationState([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, body := range []string{
+		``, `{}`, `{"format_version":2,"version":12,"dirty":false,"bootstrap":false}`,
+		`{"format_version":1,"dirty":false,"bootstrap":true}`,
+		`{"format_version":1,"version":12,"bootstrap":false}`,
+		`{"format_version":1,"version":null,"dirty":false,"bootstrap":false}`,
+		`{"format_version":1,"version":12,"dirty":false,"bootstrap":true}`,
+		`{"format_version":1,"version":null,"dirty":true,"bootstrap":true}`,
+		`{"format_version":1,"version":-1,"dirty":false,"bootstrap":false}`,
+		`{"format_version":1,"version":0,"dirty":false,"bootstrap":false}`,
+		`{"format_version":1,"version":12,"dirty":false,"bootstrap":false,"unknown":true}`,
+		`{"format_version":1,"version":12,"dirty":false,"bootstrap":false} {}`,
+		`{"format_version":1,"version":12,"dirty":false,"bootstrap":false} error=session_unconfirmed`,
+	} {
+		if _, err := decodeMigrationState([]byte(body)); err == nil {
+			t.Fatal("invalid migration state accepted")
 		}
 	}
 }

@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 import time
 
+from ci_database_config import exercise_configurations
+
 
 def run(*command, cwd=None, expected=True, **kwargs):
     result = subprocess.run(command, cwd=cwd, check=False, timeout=180, **kwargs)
@@ -18,12 +20,12 @@ def run(*command, cwd=None, expected=True, **kwargs):
 
 def sql(statement):
     # PSQL may point to a local Docker wrapper. Only the isolated QA database is used.
-    return run(os.environ.get("PSQL", "psql"), os.environ["DATABASE_URL"], "-X", "-q", "-v", "ON_ERROR_STOP=1",
+    return run(os.environ.get("PSQL", "psql"), os.environ.get("QA_DATABASE_URL", os.environ["DATABASE_URL"]), "-X", "-q", "-v", "ON_ERROR_STOP=1",
                input=statement, text=True, stdout=subprocess.DEVNULL)
 
 
 def scalar(statement):
-    result = run(os.environ.get("PSQL", "psql"), os.environ["DATABASE_URL"], "-X", "-qAt", "-v", "ON_ERROR_STOP=1",
+    result = run(os.environ.get("PSQL", "psql"), os.environ.get("QA_DATABASE_URL", os.environ["DATABASE_URL"]), "-X", "-qAt", "-v", "ON_ERROR_STOP=1",
                  input=statement, text=True, stdout=subprocess.PIPE)
     return result.stdout.strip()
 
@@ -148,6 +150,7 @@ def main():
         helper_main.write_text(source.replace('"file:///app/migrations"', json.dumps((root / "migrations").as_uri())))
         run("go", "build", "-mod=readonly", "-o", str(root / "migrate"), ".", cwd=helper_source)
         os.environ["RELEASE_ROOT"] = str(root)
+        exercise_configurations(args, root, run, sql, scalar)
         original_url = os.environ["DATABASE_URL"]
         try:
             # Supported helper options must not become PostgreSQL startup GUCs.

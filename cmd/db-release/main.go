@@ -2,11 +2,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -57,9 +59,14 @@ func boundedURL(raw string, config limits) (string, error) {
 	if err != nil || u == nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Host == "" {
 		return "", errors.New("DATABASE_URL must be a PostgreSQL URL")
 	}
-	query := u.Query()
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", errors.New("invalid database URL options")
+	}
 	query.Set("connect_timeout", strconv.Itoa(config.Connect))
-	query.Set("options", fmt.Sprintf("-c statement_timeout=%d -c lock_timeout=%d", config.Statement, config.Lock))
+	query.Set("options", strings.TrimSpace(query.Get("options")+fmt.Sprintf(" -c statement_timeout=%d -c lock_timeout=%d", config.Statement, config.Lock)))
+	query.Set("statement_timeout", strconv.Itoa(config.Statement))
+	query.Set("lock_timeout", strconv.Itoa(config.Lock))
 	u.RawQuery = query.Encode()
 	return u.String(), nil
 }
@@ -95,34 +102,72 @@ func readJSON(path string, target any) error {
 	return nil
 }
 
-func schemaVersion(ctx context.Context, db *sql.DB) (int, bool, error) {
-	var exists bool
-	if err := db.QueryRowContext(ctx, "SELECT to_regclass('public.schema_migrations') IS NOT NULL").Scan(&exists); err != nil {
-		return 0, false, databaseError("inspect schema version", err)
+type migrationState struct {
+	Version   int
+	Dirty     bool
+	Bootstrap bool
+}
+
+func decodeMigrationState(output []byte) (migrationState, error) {
+	var wire struct {
+		Format    *int            `json:"format_version"`
+		Version   json.RawMessage `json:"version"`
+		Dirty     *bool           `json:"dirty"`
+		Bootstrap *bool           `json:"bootstrap"`
 	}
-	if !exists {
-		// A missing version table is a bootstrap only when there are no application tables.
-		var empty bool
-		err := db.QueryRowContext(ctx, "SELECT NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname='public')").Scan(&empty)
-		if err != nil {
-			return 0, false, databaseError("inspect empty database", err)
-		}
-		if !empty {
-			return 0, false, errors.New("schema version missing from a nonempty database; operator resolution required")
-		}
-		return 0, false, nil
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return migrationState{}, errors.New("invalid migration inspection response")
 	}
-	var version int
-	var dirty bool
-	var count int
-	err := db.QueryRowContext(ctx, "SELECT count(*), COALESCE(min(version),0), COALESCE(bool_or(dirty),false) FROM public.schema_migrations").Scan(&count, &version, &dirty)
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return migrationState{}, errors.New("trailing migration inspection output")
+	}
+	if wire.Format == nil || *wire.Format != 1 || wire.Dirty == nil || wire.Bootstrap == nil || len(wire.Version) == 0 {
+		return migrationState{}, errors.New("incomplete migration inspection response")
+	}
+	var version *int
+	if err := json.Unmarshal(wire.Version, &version); err != nil {
+		return migrationState{}, errors.New("invalid migration version")
+	}
+	return validatedMigrationState(version, *wire.Dirty, *wire.Bootstrap)
+}
+
+func validatedMigrationState(version *int, dirty, bootstrap bool) (migrationState, error) {
+	state := migrationState{Dirty: dirty, Bootstrap: bootstrap}
+	if version != nil {
+		state.Version = *version
+	}
+	if state.Bootstrap {
+		if version != nil || state.Dirty {
+			return migrationState{}, errors.New("inconsistent bootstrap state")
+		}
+	} else if version == nil || state.Version < 1 {
+		return migrationState{}, errors.New("missing or invalid tracked version")
+	}
+	return state, nil
+}
+
+func inspectMigrationState(ctx context.Context, root, databaseURL string) (migrationState, error) {
+	output, err := guardedHelperCommand(ctx, root, databaseURL, "inspect").CombinedOutput()
 	if err != nil {
-		return 0, false, databaseError("read schema version", err)
+		return migrationState{}, inspectionFailure(output)
 	}
-	if count != 1 {
-		return 0, false, fmt.Errorf("expected exactly one schema version record; found %d", count)
+	return decodeMigrationState(output)
+}
+
+func inspectionFailure(output []byte) error {
+	reasons := map[string]string{
+		"error=tracking_missing":               "migration tracking is missing from a nonempty database",
+		"error=tracking_malformed":             "migration tracking must contain exactly one valid version record",
+		"error=unsupported_option":             "unsupported migration connection option",
+		"error=session_unconfirmed":            "migration inspection session cleanup could not be confirmed",
+		"error=cancelled session_stopped=true": "migration inspection stopped by deadline or cancellation",
 	}
-	return version, dirty, nil
+	if reason, ok := reasons[strings.TrimSpace(string(output))]; ok {
+		return errors.New(reason)
+	}
+	return errors.New("guarded migration inspection failed; operator resolution required")
 }
 
 // Report only a stable error class, never PostgreSQL messages, SQL or DSNs.
@@ -137,12 +182,13 @@ func databaseError(operation string, err error) error {
 	return fmt.Errorf("%s failed", operation)
 }
 
-func migrate(ctx context.Context, db *sql.DB, databaseURL, root string, plan contract) error {
-	version, dirty, err := schemaVersion(ctx, db)
+func migrate(ctx context.Context, databaseURL, root string, plan contract) error {
+	state, err := inspectMigrationState(ctx, root, databaseURL)
 	if err != nil {
 		return err
 	}
-	if dirty {
+	version := state.Version
+	if state.Dirty {
 		return fmt.Errorf("schema %d is dirty; operator resolution/roll-forward required", version)
 	}
 	if version != 0 && version != plan.From && version != plan.To {
@@ -158,11 +204,15 @@ func migrate(ctx context.Context, db *sql.DB, databaseURL, root string, plan con
 	if _, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("migration from schema %d to %d failed (%w); rollout stopped; inspect schema version/dirty state and resolve or roll forward", version, plan.To, err)
 	}
-	return validateVersion(ctx, db, plan.To)
+	return validateVersion(ctx, root, databaseURL, plan.To)
 }
 
 func guardedMigrationCommand(ctx context.Context, root, databaseURL string) *exec.Cmd {
-	command := exec.CommandContext(ctx, filepath.Join(root, "migrate"), "up")
+	return guardedHelperCommand(ctx, root, databaseURL, "up")
+}
+
+func guardedHelperCommand(ctx context.Context, root, databaseURL, operation string) *exec.Cmd {
+	command := exec.CommandContext(ctx, filepath.Join(root, "migrate"), operation)
 	command.Env = append(os.Environ(), "DATABASE_URL="+databaseURL)
 	// Give the helper time to cancel and verify its exact database session.
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
@@ -170,13 +220,13 @@ func guardedMigrationCommand(ctx context.Context, root, databaseURL string) *exe
 	return command
 }
 
-func validateVersion(ctx context.Context, db *sql.DB, target int) error {
-	version, dirty, err := schemaVersion(ctx, db)
+func validateVersion(ctx context.Context, root, databaseURL string, target int) error {
+	state, err := inspectMigrationState(ctx, root, databaseURL)
 	if err != nil {
 		return err
 	}
-	if dirty || version != target {
-		return fmt.Errorf("expected clean schema %d; found version=%d dirty=%t", target, version, dirty)
+	if state.Dirty || state.Bootstrap || state.Version != target {
+		return fmt.Errorf("expected clean schema %d; found version=%d dirty=%t bootstrap=%t", target, state.Version, state.Dirty, state.Bootstrap)
 	}
 	return nil
 }
@@ -273,12 +323,12 @@ func loadInstructions(root string) (limits, contract, error) {
 
 func execute(ctx context.Context, db *sql.DB, mode, root, databaseURL string, config limits, plan contract) error {
 	if mode == "migrate" {
-		return migrate(ctx, db, databaseURL, root, plan)
+		return migrate(ctx, databaseURL, root, plan)
 	}
 	if mode != "validate" {
 		return errors.New("usage: db-release migrate|validate")
 	}
-	if err := validateVersion(ctx, db, plan.To); err != nil {
+	if err := validateVersion(ctx, root, databaseURL, plan.To); err != nil {
 		return err
 	}
 	for _, name := range config.Invariants {
