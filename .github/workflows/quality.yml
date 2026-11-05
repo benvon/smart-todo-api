@@ -124,7 +124,7 @@ jobs:
           POSTGRES_DB: ci_release
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U ci -d ci_release'
+          --health-cmd "pg_isready -U ci -d ci_release"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       DATABASE_URL: postgres://ci:ci-test-only@localhost:5432/ci_release?sslmode=disable&connect_timeout=5&options=-c%20statement_timeout%3D10000%20-c%20lock_timeout%3D2000
