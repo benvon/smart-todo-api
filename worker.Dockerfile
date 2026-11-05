@@ -1,5 +1,5 @@
 # Builder stage
-FROM golang:1.25.13-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 ENV CGO_ENABLED=0
 

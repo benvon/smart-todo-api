@@ -1,8 +1,14 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/lib/pq"
 )
 
 func TestBoundedURL(t *testing.T) {
@@ -25,6 +31,30 @@ func TestBoundedURL(t *testing.T) {
 	for _, input := range []string{"", "host=example.test password=secret", "https://example.test/db"} {
 		if _, err := boundedURL(input, config); err == nil {
 			t.Errorf("accepted invalid URL %q", input)
+		}
+	}
+}
+
+func TestGuardedHelperKeepsConnectionOutOfArguments(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const secret = "postgres://fake_user:fake_password@invalid.example/fake"
+	command := guardedMigrationCommand(ctx, "/app", secret)
+	if len(command.Args) != 2 || command.Args[1] != "up" || strings.Contains(strings.Join(command.Args, " "), "fake_password") {
+		t.Fatal("guarded helper accepts only up and must not receive credentials in argv")
+	}
+	if command.Env[len(command.Env)-1] != "DATABASE_URL="+secret || command.Cancel == nil || command.WaitDelay != 10*time.Second {
+		t.Fatal("missing environment-only connection or cancellation cleanup allowance")
+	}
+}
+
+func TestDatabaseErrorsExcludeDriverMessages(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{&pq.Error{Code: "28P01", Message: "fake_password private SQL"}, errors.New("postgres://fake_user:fake_password@host/db"), context.Canceled} {
+		message := databaseError("validate", err).Error()
+		if strings.Contains(message, "fake_") || strings.Contains(message, "private SQL") || strings.Contains(message, "postgres://") {
+			t.Fatalf("driver details leaked: %s", message)
 		}
 	}
 }

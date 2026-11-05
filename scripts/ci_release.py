@@ -10,7 +10,7 @@ import tarfile
 
 MIGRATIONS = "internal/database/migrations"
 STABLE = re.compile(r"v(\d+)\.(\d+)\.(\d+)$")
-MANDATORY = {"quality", "cross-build", "web-quality", "database-compatibility"}
+MANDATORY = {"quality", "cross-build", "web-quality", "database-compatibility", "migration-safety"}
 
 
 def git(*args):

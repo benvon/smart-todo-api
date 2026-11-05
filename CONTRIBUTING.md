@@ -28,7 +28,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 3. Make your changes
 4. Add tests for your changes
 5. Run the test suite (`go test ./...`)
-6. Run linting (`golangci-lint run`)
+6. Run linting (`make lint`)
 7. Commit your changes (`git commit -m 'Add amazing feature'`)
 8. Push to your branch (`git push origin feature/amazing-feature`)
 9. Open a Pull Request using the PR template
@@ -37,10 +37,10 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 ### Prerequisites
 
-- Go 1.21 or later
+- Go 1.27.3 or later
 - Node.js 18+ (for frontend development)
 - Git
-- golangci-lint (for Go linting)
+- Go quality tools are pinned in `tools/quality/go.mod`; run `make setup`
 - ESLint (for JavaScript linting, installed via npm)
 - GoReleaser (for testing releases)
 
@@ -60,7 +60,7 @@ go mod tidy
 go test ./...
 
 # Run linter
-golangci-lint run
+make lint
 
 # Build locally
 go build -o ./bin/app ./
@@ -104,7 +104,7 @@ make ci-local
 
 - Follow the [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
 - Use `gofmt` to format your code
-- Run `golangci-lint run` before submitting
+- Run `make lint` before submitting
 - Write meaningful commit messages
 
 ### JavaScript Style Guide

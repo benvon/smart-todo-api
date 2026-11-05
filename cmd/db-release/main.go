@@ -10,12 +10,14 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type limits struct {
@@ -76,14 +78,14 @@ func readJSON(path string, target any) error {
 func schemaVersion(ctx context.Context, db *sql.DB) (int, bool, error) {
 	var exists bool
 	if err := db.QueryRowContext(ctx, "SELECT to_regclass('public.schema_migrations') IS NOT NULL").Scan(&exists); err != nil {
-		return 0, false, fmt.Errorf("inspect schema version: %w", err)
+		return 0, false, databaseError("inspect schema version", err)
 	}
 	if !exists {
 		// A missing version table is a bootstrap only when there are no application tables.
 		var empty bool
 		err := db.QueryRowContext(ctx, "SELECT NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname='public')").Scan(&empty)
 		if err != nil {
-			return 0, false, fmt.Errorf("inspect empty database: %w", err)
+			return 0, false, databaseError("inspect empty database", err)
 		}
 		if !empty {
 			return 0, false, errors.New("schema version missing from a nonempty database; operator resolution required")
@@ -95,12 +97,24 @@ func schemaVersion(ctx context.Context, db *sql.DB) (int, bool, error) {
 	var count int
 	err := db.QueryRowContext(ctx, "SELECT count(*), COALESCE(min(version),0), COALESCE(bool_or(dirty),false) FROM public.schema_migrations").Scan(&count, &version, &dirty)
 	if err != nil {
-		return 0, false, fmt.Errorf("read schema version: %w", err)
+		return 0, false, databaseError("read schema version", err)
 	}
 	if count != 1 {
 		return 0, false, fmt.Errorf("expected exactly one schema version record; found %d", count)
 	}
 	return version, dirty, nil
+}
+
+// Report only a stable error class, never PostgreSQL messages, SQL or DSNs.
+func databaseError(operation string, err error) error {
+	var serverError *pq.Error
+	if errors.As(err, &serverError) {
+		return fmt.Errorf("%s failed (SQLSTATE %s)", operation, serverError.Code)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%s stopped by deadline or cancellation", operation)
+	}
+	return fmt.Errorf("%s failed", operation)
 }
 
 func migrate(ctx context.Context, db *sql.DB, databaseURL, root string, plan contract) error {
@@ -118,13 +132,22 @@ func migrate(ctx context.Context, db *sql.DB, databaseURL, root string, plan con
 		fmt.Printf("schema %d clean; no pending migrations\n", version)
 		return nil
 	}
-	command := exec.CommandContext(ctx, filepath.Join(root, "migrate"), "-path", filepath.Join(root, "migrations"),
-		"-database", databaseURL, "-lock-timeout", "5", "up")
-	// migrate can include connection strings in errors. Never print its raw output.
+	command := guardedMigrationCommand(ctx, root, databaseURL)
+	// Only the guarded helper owns migration sessions and their cancellation.
+	// Connection details remain in the environment, never argv or diagnostics.
 	if _, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("migration from schema %d to %d failed (%w); rollout stopped; inspect schema version/dirty state and resolve or roll forward", version, plan.To, err)
 	}
 	return validateVersion(ctx, db, plan.To)
+}
+
+func guardedMigrationCommand(ctx context.Context, root, databaseURL string) *exec.Cmd {
+	command := exec.CommandContext(ctx, filepath.Join(root, "migrate"), "up")
+	command.Env = append(os.Environ(), "DATABASE_URL="+databaseURL)
+	// Give the helper time to cancel and verify its exact database session.
+	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
+	command.WaitDelay = 10 * time.Second
+	return command
 }
 
 func validateVersion(ctx context.Context, db *sql.DB, target int) error {
@@ -145,20 +168,20 @@ func validateInvariant(ctx context.Context, db *sql.DB, path string) (result err
 	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return fmt.Errorf("begin invariant transaction: %w", err)
+		return databaseError("begin invariant transaction", err)
 	}
 	defer func() {
 		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) && result == nil {
-			result = err
+			result = databaseError("close invariant transaction", err)
 		}
 	}()
 	rows, err := tx.QueryContext(ctx, string(query))
 	if err != nil {
-		return fmt.Errorf("execute invariant %s: %w", filepath.Base(path), err)
+		return databaseError("execute invariant "+filepath.Base(path), err)
 	}
 	defer func() {
 		if err := rows.Close(); err != nil && result == nil {
-			result = err
+			result = databaseError("close invariant result", err)
 		}
 	}()
 	return checkInvariantRows(rows)
@@ -170,18 +193,18 @@ func checkInvariantRows(rows *sql.Rows) error {
 		return errors.New("invariant returned no row")
 	}
 	if err := rows.Scan(&valid); err != nil {
-		return fmt.Errorf("invariant must return one boolean: %w", err)
+		return databaseError("read one invariant boolean", err)
 	}
 	if !valid || rows.Next() || rows.NextResultSet() {
 		return errors.New("invariant must return exactly one true boolean")
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read invariant result: %w", err)
+		return databaseError("read invariant result", err)
 	}
 	return nil
 }
 
-func run(mode, root string) error {
+func run(mode, root string) (result error) {
 	config, plan, err := loadInstructions(root)
 	if err != nil {
 		return err
@@ -190,7 +213,9 @@ func run(mode, root string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.Overall)*time.Second)
+	signals, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stopSignals()
+	ctx, cancel := context.WithTimeout(signals, time.Duration(config.Overall)*time.Second)
 	defer cancel()
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
@@ -198,7 +223,7 @@ func run(mode, root string) error {
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			fmt.Fprintln(os.Stderr, "close database connection failed")
+			result = errors.Join(result, errors.New("close database connection failed"))
 		}
 	}()
 	return execute(ctx, db, mode, root, databaseURL, config, plan)

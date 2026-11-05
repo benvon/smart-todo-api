@@ -12,12 +12,31 @@ permissions:
 
 jobs:
   quality:
-    uses: benvon/reusable-workflows/.github/workflows/go-quality.yml@f70796de0a6527dbed267a64835c3cc81b8144e0
-    with:
-      quality_command: |
-        make deps test lint security vulnerability-check mod-tidy-check
-        go build -v -o /dev/null ./cmd/server
-        go build -v -o /dev/null ./cmd/configure
+    name: quality / quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            tools/quality/go.sum
+
+      - name: Verify Go-managed quality tools
+        run: make setup
+
+      - name: Run quality checks
+        run: |
+          set -euo pipefail
+          make deps test lint security vulnerability-check mod-tidy-check
+          go build -v -o /dev/null ./cmd/server
+          go build -v -o /dev/null ./cmd/configure
 
   cross-build:
     name: cross-build
@@ -131,7 +150,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bin" "$RUNNER_TEMP/previous"
-          GOBIN="$RUNNER_TEMP/bin" go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.20.1
           go build -mod=readonly -o "$RUNNER_TEMP/bin/db-release" ./cmd/db-release
           go build -mod=readonly -o "$RUNNER_TEMP/bin/compat-new" ./scripts/compatibility
           PREVIOUS=$(jq -r .previous_revision "$RUNNER_TEMP/contract.json")
@@ -143,7 +161,7 @@ jobs:
       - name: Exercise real PostgreSQL migration and application overlap
         run: |
           python3 scripts/ci_database.py \
-            --previous "$RUNNER_TEMP/previous" --migrate "$RUNNER_TEMP/bin/migrate" \
+            --previous "$RUNNER_TEMP/previous" --migrate-source tools/migrate \
             --runner "$RUNNER_TEMP/bin/db-release" --old-binary "$RUNNER_TEMP/bin/compat-old" \
             --new-binary "$RUNNER_TEMP/bin/compat-new" --contract "$RUNNER_TEMP/contract.json"
       - uses: actions/upload-artifact@v4
@@ -152,17 +170,20 @@ jobs:
           path: ${{ runner.temp }}/contract.json
           if-no-files-found: error
 
+  migration-safety:
+    uses: ./.github/workflows/migration-quality.yml
+
   mandatory-qa:
     name: mandatory-qa
     if: always()
-    needs: [quality, cross-build, web-quality, database-compatibility]
+    needs: [quality, cross-build, web-quality, database-compatibility, migration-safety]
     runs-on: ubuntu-latest
     steps:
       - name: Require all mandatory results
         env:
           QA_RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "$QA_RESULTS" | jq -e 'length == 4 and all(.[]; .result == "success")'
+          echo "$QA_RESULTS" | jq -e 'length == 5 and all(.[]; .result == "success")'
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
         with:

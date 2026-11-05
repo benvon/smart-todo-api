@@ -9,7 +9,7 @@
 REQUIRED_GO_VERSION := $(shell awk '/^go[[:space:]]+/ {print $$2; exit}' go.mod)
 BINARY_NAME := $(shell git rev-parse --show-toplevel | xargs basename)
 BUILD_DIR := ./bin
-GOVULNCHECK_VERSION ?= 1.1.4
+GO_TOOL := go tool -modfile=$(CURDIR)/tools/quality/go.mod
 
 # Colors for output
 GREEN := \033[32m
@@ -41,7 +41,7 @@ endef
 help:
 	@echo "Available targets:"
 	@echo "  $(GREEN)Development targets:$(NC)"
-	@echo "    setup              - Install required tools and dependencies via asdf"
+	@echo "    setup              - Install required tools and dependencies with the Go toolchain"
 	@echo "    deps               - Download and verify Go dependencies"
 	@echo "    clean              - Remove build artifacts"
 	@echo "    clean-template     - Clean up template code to prepare for new project"
@@ -91,20 +91,11 @@ help:
 # Development Setup
 # =============================================================================
 
-## setup: Install required development tools via asdf
+## setup: Download and verify pinned Go development tools
 setup: check-go-version
-	$(call print_info,Installing development tools via asdf...)
-	@asdf plugin add golangci-lint || true
-	@asdf plugin add gosec || true
-	@asdf plugin add govulncheck || true
-	$(call print_info,Installing Go development tools...)
-	@asdf install golang || echo "Go already installed"
-	@asdf install golangci-lint || echo "golangci-lint already installed"
-	@asdf install gosec || echo "gosec already installed"
-	@asdf install govulncheck || echo "govulncheck already installed"
-	@asdf reshim
-	$(call print_success,Development tools installed successfully!)
-	@make verify-tools
+	go -C tools/quality mod download
+	go -C tools/quality mod verify
+	$(MAKE) verify-tools
 
 ## check-go-version: Verify Go version matches project requirements
 check-go-version:
@@ -128,7 +119,7 @@ check-go-version:
 	highest=$$(printf '%s\n%s\n' "$$required_version" "$$current_version" | sort -V | tail -1); \
 	if [ "$$highest" != "$$current_version" ]; then \
 		$(call print_error,Error: Go version $$required_version or newer required. Current version: go$$current_version); \
-		$(call print_info,Please update Go using: asdf install); \
+		$(call print_info,Please update Go using: mise install); \
 		exit 1; \
 	fi
 	$(call print_success,Go version check passed!)
@@ -153,16 +144,11 @@ verify:
 
 ## verify-tools: Verify all development tools are working correctly
 verify-tools:
-	$(call print_info,Verifying development tools...)
-	@echo "Go version: $$(go version)"
-	@echo "golangci-lint version: $$(golangci-lint version)"
-	@if command -v govulncheck >/dev/null 2>&1 && govulncheck -version >/dev/null 2>&1; then \
-		echo "govulncheck version: $$(govulncheck -version)"; \
-	else \
-		echo "govulncheck version: fallback via go run v$(GOVULNCHECK_VERSION)"; \
-	fi
-	@echo "gosec version: $$(gosec -version 2>/dev/null || echo 'gosec not available')"
-	$(call print_success,Tool verification completed!)
+	go version
+	$(GO_TOOL) golangci-lint version
+	$(GO_TOOL) govulncheck -version
+	$(GO_TOOL) gosec -version
+	@printf 'package tooling\n' | $(GO_TOOL) goimports >/dev/null
 
 ## update-tool-versions: Update .tool-versions with latest versions (respects pinned versions)
 update-tool-versions:
@@ -196,11 +182,11 @@ update-tool-versions:
 	$(call print_success,Updated .tool-versions successfully!)
 	$(call print_info,Run 'asdf install' to install updated versions)
 
-## pin-tool-version: Pin a specific tool version (usage: make pin-tool-version TOOL=golangci-lint VERSION=2.3.0)
+## pin-tool-version: Pin a specific tool version (usage: make pin-tool-version TOOL=nodejs VERSION=24.13.0)
 pin-tool-version:
 	@if [ -z "$(TOOL)" ] || [ -z "$(VERSION)" ]; then \
 		$(call print_error,Error: Usage: make pin-tool-version TOOL=toolname VERSION=version); \
-		$(call print_info,Example: make pin-tool-version TOOL=golangci-lint VERSION=2.3.0); \
+		$(call print_info,Example: make pin-tool-version TOOL=nodejs VERSION=24.13.0); \
 		exit 1; \
 	fi
 	$(call print_info,Pinning $(TOOL) to version $(VERSION)...)
@@ -212,11 +198,11 @@ pin-tool-version:
 	@rm -f .tool-versions.bak
 	$(call print_success,Pinned $(TOOL) to $(VERSION))
 
-## unpin-tool-version: Unpin a specific tool version (usage: make unpin-tool-version TOOL=golangci-lint)
+## unpin-tool-version: Unpin a specific tool version (usage: make unpin-tool-version TOOL=nodejs)
 unpin-tool-version:
 	@if [ -z "$(TOOL)" ]; then \
 		$(call print_error,Error: Usage: make unpin-tool-version TOOL=toolname); \
-		$(call print_info,Example: make unpin-tool-version TOOL=golangci-lint); \
+		$(call print_info,Example: make unpin-tool-version TOOL=nodejs); \
 		exit 1; \
 	fi
 	$(call print_info,Unpinning $(TOOL)...)
@@ -243,37 +229,31 @@ test:
 ## lint: Run golangci-lint
 lint: check-golangci-lint-version
 	$(call print_info,Running linter...)
-	golangci-lint run --timeout=10m
+	$(GO_TOOL) golangci-lint run --timeout=10m
 	$(call print_success,Linting completed!)
 
 ## check-golangci-lint-version: Verify golangci-lint version is correct
 check-golangci-lint-version:
-	$(call print_info,Checking golangci-lint version...)
-	@if ! golangci-lint version | grep -q "version 2"; then \
-		$(call print_error,Error: golangci-lint version 2.x required. Current version:); \
-		golangci-lint version; \
-		$(call print_info,Please run: asdf reshim golangci-lint); \
-		exit 1; \
-	fi
-	$(call print_success,golangci-lint version check passed!)
+	$(GO_TOOL) golangci-lint version
 
 ## security: Run Gosec security scanner
 security:
 	$(call print_info,Running security scan...)
-	gosec -no-fail -fmt text ./...
+	$(GO_TOOL) gosec -no-fail -fmt text ./...
 	$(call print_success,Security scan completed!)
 
 ## vulnerability-check: Run govulncheck
 vulnerability-check:
 	$(call print_info,Checking for vulnerabilities...)
-	@./scripts/ensure_govulncheck.sh $(GOVULNCHECK_VERSION) ./...
+	$(GO_TOOL) govulncheck ./...
 	$(call print_success,Vulnerability check completed!)
 
 ## mod-tidy-check: Check if go mod tidy is needed
 mod-tidy-check:
 	$(call print_info,Checking if go mod tidy is needed...)
 	@go mod tidy
-	@files="go.mod"; \
+	@go -C tools/quality mod tidy
+	@files="go.mod tools/quality/go.mod tools/quality/go.sum"; \
 	if git ls-files --error-unmatch go.sum >/dev/null 2>&1; then \
 		files="$$files go.sum"; \
 	elif [ -f go.sum ]; then \

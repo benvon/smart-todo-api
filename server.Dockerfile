@@ -1,5 +1,5 @@
 # Builder stage
-FROM golang:1.25.13-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 ENV CGO_ENABLED=0
 
@@ -11,7 +11,9 @@ RUN mkdir -p /app/bin && \
     go build -mod=readonly -o /app/bin/server-linux-amd64 ./cmd/server && \
     go build -mod=readonly -o /app/bin/configure-linux-amd64 ./cmd/configure && \
     go build -mod=readonly -o /app/bin/db-release ./cmd/db-release && \
-    GOBIN=/app go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.20.1
+    go -C tools/migrate mod download && \
+    go -C tools/migrate mod verify && \
+    go -C tools/migrate build -mod=readonly -o /app/migrate .
 
 # Final stage
 FROM ubuntu:24.04 AS runner

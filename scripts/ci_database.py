@@ -22,6 +22,39 @@ def sql(statement):
                input=statement, text=True, stdout=subprocess.DEVNULL)
 
 
+def scalar(statement):
+    result = run(os.environ.get("PSQL", "psql"), os.environ["DATABASE_URL"], "-X", "-qAt", "-v", "ON_ERROR_STOP=1",
+                 input=statement, text=True, stdout=subprocess.PIPE)
+    return result.stdout.strip()
+
+
+def interrupted_migration(args, root, version):
+    migration = root / "migrations" / f"{version:06}_interrupted.up.sql"
+    migration.write_text("SELECT pg_sleep(20);")
+    process = subprocess.Popen([args.runner, "migrate"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = time.monotonic() + 8
+        active = "SELECT count(*) FROM pg_stat_activity WHERE application_name LIKE 'smart-todo-migrate-%' AND state='active' AND query LIKE 'SELECT pg_sleep%'"
+        while scalar(active) != "1":
+            if process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError("release command did not enter guarded migration")
+            time.sleep(0.05)
+        process.terminate()
+        if process.wait(timeout=12) == 0 or scalar(active) != "0":
+            raise RuntimeError("release command failed to stop its guarded database session")
+        output = process.stdout.read()
+        if "postgres://" in output or "ci-test-only" in output:
+            raise RuntimeError("release cancellation leaked database credentials")
+        if scalar("SELECT dirty FROM schema_migrations") != "t":
+            raise RuntimeError("interrupted migration must retain dirty state")
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        process.stdout.close()
+        migration.unlink()
+
+
 def wait_ready(process, path):
     deadline = time.monotonic() + 20
     while not path.exists():
@@ -32,8 +65,15 @@ def wait_ready(process, path):
 
 def overlap(args, root, state, scenario):
     sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    run(args.migrate, "-path", str(Path(args.previous) / "internal/database/migrations"),
-        "-database", os.environ["DATABASE_URL"], "up")
+    # The test copy only relocates the fixed migration path; production helper
+    # source, cancellation guards and environment-only connection handling stay intact.
+    (root / "migrations").rename(root / "candidate-migrations")
+    shutil.copytree(Path(args.previous) / "internal/database/migrations", root / "migrations")
+    try:
+        run(str(root / "migrate"), "up")
+    finally:
+        shutil.rmtree(root / "migrations")
+        (root / "candidate-migrations").rename(root / "migrations")
     # Bounded, reproducible data-volume smoke test, not production characterization.
     sql("""INSERT INTO users(id,email) VALUES ('20000000-0000-4000-8000-000000000001','volume@example.test');
         INSERT INTO todos(user_id,text)
@@ -91,7 +131,7 @@ def overlap(args, root, state, scenario):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for flag in ("previous", "migrate", "runner", "old-binary", "new-binary", "contract"):
+    for flag in ("previous", "migrate-source", "runner", "old-binary", "new-binary", "contract"):
         parser.add_argument("--" + flag, required=True)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="smart-todo-db-qa-") as directory:
@@ -99,7 +139,14 @@ def main():
         shutil.copytree("internal/database/migrations", root / "migrations")
         shutil.copytree("release", root / "release")
         shutil.copyfile(args.contract, root / "release/contract.json")
-        os.symlink(args.migrate, root / "migrate")
+        helper_source = root / "helper-source"
+        shutil.copytree(args.migrate_source, helper_source)
+        helper_main = helper_source / "main.go"
+        source = helper_main.read_text()
+        if source.count('"file:///app/migrations"') != 1:
+            raise RuntimeError("guarded helper migration path changed; review QA relocation")
+        helper_main.write_text(source.replace('"file:///app/migrations"', json.dumps((root / "migrations").as_uri())))
+        run("go", "build", "-mod=readonly", "-o", str(root / "migrate"), ".", cwd=helper_source)
         os.environ["RELEASE_ROOT"] = str(root)
         run(args.runner, "migrate")  # Empty database bootstrap.
         run(args.runner, "validate")
@@ -173,6 +220,11 @@ def main():
         final_plan["from_version"] = final_plan["to_version"]
         final_plan["to_version"] = broken_version
         (root / "release/contract.json").write_text(json.dumps(final_plan))
+        (root / "migrations" / f"{broken_version:06}_broken.up.sql").unlink()
+        interrupted_migration(args, root, broken_version)
+        # Reset only the disposable fixture after proving interruption is dirty.
+        sql(f"UPDATE schema_migrations SET version={final_plan['from_version']},dirty=false;")
+        (root / "migrations" / f"{broken_version:06}_broken.up.sql").write_text("SELECT ci_missing_function();")
         run(args.runner, "migrate", expected=False)
         run(args.runner, "validate", expected=False)
         print("PASS: PostgreSQL bootstrap, replay, failure limits, N-1 migration and bidirectional API/worker overlap")

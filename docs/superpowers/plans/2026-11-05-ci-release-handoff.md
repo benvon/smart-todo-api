@@ -38,3 +38,11 @@ Run Python unit tests, build the compatibility fixture against both revisions, r
 - Final linux/amd64 API and worker images built locally. Existing Docker builders required alignment from 1.25.9 to the already-declared go.mod 1.25.13; builds now preserve module files and pin the migration CLI. No application dependency changes.
 - Independent review findings addressed: PR read permission and permanent no-change overlap coverage. Local bot-tag dispatch also reviewed; no outstanding actionable findings.
 - Remote dispatch, release publication, GHCR publication, artifact attestation and deployment were deliberately not executed.
+
+## Integration with main / #105
+
+The implementation was integrated with main commit 641df1c. Go 1.27.3, application dependencies, Go-managed quality tools, the guarded helper module and legacy migration shell were inherited from main. The helper module and legacy shell remain byte-for-byte unchanged from that base.
+
+The release command now invokes the guarded helper with only `up`, keeps the URL in the environment, forwards cancellation via SIGTERM and allows 10 seconds for cleanup. Database close failures fail the step, and driver diagnostics expose only error classes. Temporary PostgreSQL test copies relocate only the helper migration source path; production gains no path override. The original migration-safety workflow is now the fifth mandatory release check.
+
+Integration checks passed: Go/application race tests on 1.27.3, guarded helper race tests and vet, Python tests, pinned Go-managed first-party lint, actionlint, GoReleaser check, both linux/amd64 image builds, legacy shell contract tests, and PostgreSQL bootstrap/no-change/release/additive overlap plus dirty/error/timeout/cancellation checks. The new release cancellation test verifies the guarded query stops and dirty state remains. Independent integration review reported no actionable findings. The complete packaged helper safety suite also passed, including the real 90-second migration timeout, exact-session cancellation, idle/buffered source-gap cancellation, unsupported-option rejection, ordinary-role operation, credential redaction and bounded connection retries. All 20 cross-platform command builds passed with Go 1.27.3. No release or deployment is authorized by this merge.
