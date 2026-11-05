@@ -25,3 +25,31 @@ jobs:
       caller_event_name: ${{ github.event_name }}
       caller_sha: ${{ github.sha }}
       manual_release_type: ${{ github.event.inputs.release_type || '' }}
+
+  dispatch-release:
+    needs: release-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Dispatch gated release for the bot-created tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(git tag --points-at "$GITHUB_SHA" --list 'v*' | sort -V | tail -n1)
+          if [[ -z "$TAG" ]]; then
+            echo 'No release tag at this revision; nothing to publish.'
+            exit 0
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; no dispatch. Resolve incomplete drafts explicitly.'
+            exit 0
+          fi
+          # GITHUB_TOKEN pushes do not emit another Actions run. Explicit
+          # workflow_dispatch is supported without adding a PAT or App secret.
+          gh workflow run release.yml --ref "$TAG"

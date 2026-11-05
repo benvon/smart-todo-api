@@ -1,0 +1,8 @@
+{
+  "format_version": 1,
+  "overall_timeout_seconds": 120,
+  "statement_timeout_ms": 10000,
+  "lock_timeout_ms": 2000,
+  "connect_timeout_seconds": 5,
+  "invariants": ["schema-invariants.sql"]
+}

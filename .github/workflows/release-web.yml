@@ -82,23 +82,20 @@ jobs:
           branch: main
           wranglerVersion: "3"
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ steps.package.outputs.package_file }}
-          tag_name: ${{ github.ref_name }}
-          name: "Frontend Release ${{ github.ref_name }}"
-          body: |
-            ## Frontend Deployment Package
-            
-            This release contains the built frontend for deployment to SPA/PWA hosts like Cloudflare Pages.
-            
-            ### Download
-            - **Deployment Package**: smart-todo-web-v${{ steps.version.outputs.version }}.tar.gz
-            
-            ### Installation
-            Extract the tarball and deploy the contents to your hosting provider.
-            
-            See the package README for detailed deployment instructions.
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-rc') }}
+      # Only the API release workflow may create/publish the shared release.
+      - name: Attach frontend package to the gated release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_FILE: ${{ steps.package.outputs.package_file }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+              gh release upload "$RELEASE_TAG" "$PACKAGE_FILE"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo 'No published QA-gated release found; frontend package was not attached.' >&2
+          exit 1
