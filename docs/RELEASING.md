@@ -47,6 +47,8 @@ Run both database steps in the packaged API image by digest, injecting `DATABASE
 
 Migration accepts only a truly empty database, recorded N−1 version or clean target version. It rejects dirty/unsupported states, never forces a version and never runs down migrations. Bootstrap applies immutable history; upgrades apply pending files. Equal starting/target versions indicate no schema change: the runtime still checks the actual clean target and runs all validation. Missing version tracking in a nonempty database requires operator resolution.
 
+Inspection and validation strip migration-only `x-` URL options before opening PostgreSQL connections, while preserving TLS settings and connection limits. The guarded migration helper receives the separate URL with its migration options intact.
+
 Validation requires the exact target version with `dirty=false`, then runs a finite SQL invariant list in read-only transactions. Each file returns exactly one row containing one true boolean. Use catalog or indexed bounded checks. No production sampling, soak/load test, rehearsal or application readiness grading belongs here. Existing application instances remain live throughout.
 
 Failures stop CD for operator resolution/roll-forward. Preserve the failed step, expected/found schema and invariant name. Never print credentials, force-clean a dirty migration, automatically roll back images or require prior deployment success.

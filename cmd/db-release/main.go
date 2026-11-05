@@ -64,6 +64,26 @@ func boundedURL(raw string, config limits) (string, error) {
 	return u.String(), nil
 }
 
+// Inspection uses ordinary PostgreSQL parameters. Migration options stay in the
+// separate URL supplied to the guarded helper, which validates them itself.
+func inspectionURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", errors.New("invalid inspection database URL")
+	}
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", errors.New("invalid inspection database options")
+	}
+	for key := range query {
+		if strings.HasPrefix(key, "x-") {
+			query.Del(key)
+		}
+	}
+	u.RawQuery = query.Encode()
+	return u.String(), nil
+}
+
 func readJSON(path string, target any) error {
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -213,11 +233,15 @@ func run(mode, root string) (result error) {
 	if err != nil {
 		return err
 	}
+	inspection, err := inspectionURL(databaseURL)
+	if err != nil {
+		return err
+	}
 	signals, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stopSignals()
 	ctx, cancel := context.WithTimeout(signals, time.Duration(config.Overall)*time.Second)
 	defer cancel()
-	db, err := sql.Open("postgres", databaseURL)
+	db, err := sql.Open("postgres", inspection)
 	if err != nil {
 		return errors.New("open database connection failed")
 	}

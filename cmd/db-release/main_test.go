@@ -49,6 +49,36 @@ func TestGuardedHelperKeepsConnectionOutOfArguments(t *testing.T) {
 	}
 }
 
+func TestInspectionURLSeparatesMigrationOptions(t *testing.T) {
+	t.Parallel()
+	const raw = "postgres://fake_user:fake_password@example.test/db?sslmode=verify-full&sslrootcert=%2Ffake%2Fca.pem&x-statement-timeout=500&x-multi-statement=false"
+	config := limits{Overall: 120, Statement: 10000, Lock: 2000, Connect: 5}
+	helperURL, err := boundedURL(raw, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := inspectionURL(helperURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Has("x-statement-timeout") || parsed.Query().Has("x-multi-statement") {
+		t.Fatal("migration options must not reach PostgreSQL startup")
+	}
+	if parsed.Query().Get("sslmode") != "verify-full" || parsed.Query().Get("sslrootcert") != "/fake/ca.pem" || parsed.Query().Get("connect_timeout") != "5" {
+		t.Fatal("inspection must preserve TLS settings and connection bounds")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	command := guardedMigrationCommand(ctx, "/app", helperURL)
+	if !strings.Contains(command.Env[len(command.Env)-1], "x-statement-timeout=500") {
+		t.Fatal("guarded helper must retain migration-specific options")
+	}
+}
+
 func TestDatabaseErrorsExcludeDriverMessages(t *testing.T) {
 	t.Parallel()
 	for _, err := range []error{&pq.Error{Code: "28P01", Message: "fake_password private SQL"}, errors.New("postgres://fake_user:fake_password@host/db"), context.Canceled} {

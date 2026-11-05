@@ -148,9 +148,15 @@ def main():
         helper_main.write_text(source.replace('"file:///app/migrations"', json.dumps((root / "migrations").as_uri())))
         run("go", "build", "-mod=readonly", "-o", str(root / "migrate"), ".", cwd=helper_source)
         os.environ["RELEASE_ROOT"] = str(root)
-        run(args.runner, "migrate")  # Empty database bootstrap.
-        run(args.runner, "validate")
-        run(args.runner, "migrate")
+        original_url = os.environ["DATABASE_URL"]
+        try:
+            # Supported helper options must not become PostgreSQL startup GUCs.
+            os.environ["DATABASE_URL"] = original_url + "&x-statement-timeout=500"
+            run(args.runner, "migrate")  # Empty bootstrap through guarded helper.
+            run(args.runner, "validate")
+            run(args.runner, "migrate")  # Same URL must also support no-change.
+        finally:
+            os.environ["DATABASE_URL"] = original_url
         plan = json.loads(Path(args.contract).read_text())
         sql("UPDATE schema_migrations SET dirty=true;")
         run(args.runner, "migrate", expected=False)
