@@ -73,15 +73,10 @@ def exercise_configurations(args, root, run, sql, scalar):
             os.environ["DATABASE_URL"] = original_url
             sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS migration_meta CASCADE; CREATE SCHEMA migration_meta;")
             (root / "release/contract.json").write_text(original_contract)
-            if name == "search-path":
-                # Existing app tables stay public; tracking follows search_path.
-                run(args.runner, "migrate")
-                sql("ALTER TABLE public.schema_migrations SET SCHEMA migration_meta; ALTER TABLE migration_meta.schema_migrations RENAME TO release_history;")
             os.environ["DATABASE_URL"] = configured_url(original_url, options)
-            if name != "search-path":
-                run(args.runner, "validate", expected=False)
-                if scalar("SELECT count(*) FROM pg_tables WHERE schemaname IN ('public','migration_meta')") != "0":
-                    raise RuntimeError("inspection must not create migration tracking tables")
+            run(args.runner, "validate", expected=False)
+            if scalar("SELECT count(*) FROM pg_tables WHERE schemaname IN ('public','migration_meta')") != "0":
+                raise RuntimeError("inspection must not create migration tracking tables")
             run(args.runner, "migrate")
             run(args.runner, "validate")
             relation = quoted(schema) + "." + quoted(table)
@@ -89,7 +84,13 @@ def exercise_configurations(args, root, run, sql, scalar):
                 raise RuntimeError("migration helper and release command disagree on tracking table")
             if name == "custom":
                 inspection_deadline(args, root, relation, run, scalar)
-            fixture.write_text("ALTER TABLE public.todos ADD COLUMN config_fixture integer;")
+            if name == "search-path":
+                # An index on another schema's table cannot satisfy the check.
+                sql("CREATE TABLE public.todos(id integer); CREATE INDEX idx_todos_user_id_created_at_desc ON public.todos(id); DROP INDEX migration_meta.idx_todos_user_id_created_at_desc;")
+                run(args.runner, "validate", expected=False)
+                sql("CREATE INDEX idx_todos_user_id_created_at_desc ON migration_meta.todos(user_id,created_at DESC); DROP TABLE public.todos;")
+                run(args.runner, "validate")
+            fixture.write_text("ALTER TABLE todos ADD COLUMN config_fixture integer;")
             changed = {**plan, "from_version": plan["to_version"], "to_version": upgrade}
             (root / "release/contract.json").write_text(json.dumps(changed))
             run(args.runner, "migrate")
