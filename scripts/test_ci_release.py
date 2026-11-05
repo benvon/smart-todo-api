@@ -10,6 +10,8 @@ import argparse
 import os
 import tarfile
 import shutil
+import subprocess
+import re
 
 SPEC = importlib.util.spec_from_file_location("ci_release", Path(__file__).with_name("ci_release.py"))
 release = importlib.util.module_from_spec(SPEC)
@@ -17,6 +19,44 @@ SPEC.loader.exec_module(release)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_release_preparation_keeps_checkout_clean(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / ".github/workflows/release.yml").read_text()
+        download = workflow.split("uses: actions/download-artifact@v4", 1)[1]
+        download_path = re.search(r"path: (.+)", download).group(1)
+        preparation = workflow.split("name: Verify tested revision and prepare image instructions", 1)[1]
+        commands = preparation.split("run: |\n", 1)[1].split("      - uses:", 1)[0]
+        commands = "\n".join(line[10:] for line in commands.splitlines())
+        with tempfile.TemporaryDirectory() as directory:
+            temporary = Path(directory)
+            checkout = temporary / "checkout"
+            subprocess.run(["git", "clone", "--quiet", "--shared", str(root), str(checkout)], check=True)
+            revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
+            runner_temp = temporary / "runner temp"
+            github_env = temporary / "github-env"
+            staging = workflow.split("name: Set release staging directory", 1)[1].split("\n", 2)[1]
+            staging_command = staging.split("run: ", 1)[1]
+            subprocess.run(["bash", "-c", staging_command], check=True,
+                           env=dict(os.environ, RUNNER_TEMP=str(runner_temp), GITHUB_ENV=str(github_env)))
+            qa_directory = Path(github_env.read_text().strip().split("=", 1)[1])
+            destination = Path(download_path.replace("${{ env.RELEASE_QA_DIR }}", str(qa_directory)).replace("${{ runner.temp }}", str(runner_temp)))
+            if not destination.is_absolute():
+                destination = checkout / destination
+            destination.mkdir(parents=True)
+            (destination / "qa.json").write_text(json.dumps({"source_revision": revision, "result": "success"}))
+            (destination / "contract.json").write_text('{"tested": true}')
+            tools = temporary / "tools"
+            tools.mkdir()
+            gh = tools / "gh"
+            gh.write_text("#!/bin/sh\nexit 1\n")  # No existing release; never call GitHub.
+            gh.chmod(0o755)
+            environment = dict(os.environ, RUNNER_TEMP=str(runner_temp), RELEASE_QA_DIR=str(qa_directory),
+                               RELEASE_TAG="v4.2.1", PATH=str(tools) + os.pathsep + os.environ["PATH"])
+            subprocess.run(["bash", "-c", commands], cwd=checkout, env=environment, check=True)
+            self.assertEqual((checkout / "release/contract.json").read_text(), '{"tested": true}')
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=checkout, text=True)
+            self.assertEqual(status, "", "Release preparation must preserve GoReleaser's clean-tree requirement")
+
     def test_baseline_uses_previous_published_stable(self):
         releases = [
             {"tag_name": "v4.2.0", "draft": False, "prerelease": False},

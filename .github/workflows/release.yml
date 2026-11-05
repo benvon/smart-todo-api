@@ -36,17 +36,21 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Set release staging directory
+        run: echo "RELEASE_QA_DIR=$RUNNER_TEMP/release-qa" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           name: ${{ needs.qa.outputs.qa-artifact-name }}
-          path: qa
+          path: ${{ env.RELEASE_QA_DIR }}
       - name: Verify tested revision and prepare image instructions
         run: |
           set -euo pipefail
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]
-          test "$(jq -r .source_revision qa/qa.json)" = "$(git rev-parse HEAD)"
-          test "$(jq -r .result qa/qa.json)" = success
-          cp qa/contract.json release/contract.json
+          test "$(jq -r .source_revision "$RELEASE_QA_DIR/qa.json")" = "$(git rev-parse HEAD)"
+          test "$(jq -r .result "$RELEASE_QA_DIR/qa.json")" = success
+          cp "$RELEASE_QA_DIR/contract.json" release/contract.json
+          # Keep transient evidence outside the checkout; GoReleaser requires a clean tree.
+          test -z "$(git status --porcelain)"
           # A failed draft requires operator resolution before retrying.
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo 'Release already exists; resolve the existing publication before retrying.' >&2
@@ -92,14 +96,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/image-instructions"
           docker cp "$CONTAINER:/app/release" "$RUNNER_TEMP/image-instructions/release"
           docker cp "$CONTAINER:/app/migrations" "$RUNNER_TEMP/image-instructions/migrations"
-          python3 scripts/ci_release.py verify-image --root "$RUNNER_TEMP/image-instructions" --contract qa/contract.json
+          python3 scripts/ci_release.py verify-image --root "$RUNNER_TEMP/image-instructions" --contract "$RELEASE_QA_DIR/contract.json"
           git diff --exit-code -- go.mod go.sum
           jq -n --arg server "$SERVER" --arg worker "$WORKER" --arg sd "$SERVER_DIGEST" --arg wd "$WORKER_DIGEST" \
-            '{api:{tag:$server,digest:$sd},worker:{tag:$worker,digest:$wd}}' > qa/images.json
-          gh api "repos/$GITHUB_REPOSITORY/commits/$(git rev-parse HEAD)/pulls" --jq '[.[] | {number, url:.html_url}]' > qa/prs.json
-          python3 scripts/ci_release.py package --contract qa/contract.json --evidence qa/qa.json \
-            --images qa/images.json --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
-            --prs qa/prs.json --output dist/release-handoff
+            '{api:{tag:$server,digest:$sd},worker:{tag:$worker,digest:$wd}}' > "$RELEASE_QA_DIR/images.json"
+          gh api "repos/$GITHUB_REPOSITORY/commits/$(git rev-parse HEAD)/pulls" --jq '[.[] | {number, url:.html_url}]' > "$RELEASE_QA_DIR/prs.json"
+          python3 scripts/ci_release.py package --contract "$RELEASE_QA_DIR/contract.json" --evidence "$RELEASE_QA_DIR/qa.json" \
+            --images "$RELEASE_QA_DIR/images.json" --tag "$RELEASE_TAG" --repository "$GITHUB_REPOSITORY" \
+            --prs "$RELEASE_QA_DIR/prs.json" --output dist/release-handoff
       - name: Attest release instructions and artifact bindings
         uses: actions/attest-build-provenance@v3
         with:
