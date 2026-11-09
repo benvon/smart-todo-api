@@ -1,31 +1,44 @@
-# See https://docs.github.com/en/code-security/supply-chain-security/keeping-your-dependencies-updated-automatically/configuration-options-for-dependency-updates
+# See https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 version: 2
 
+# Version updates across Go, Actions, and npm share one weekly pull request.
+# commit-message belongs on this group. Dependabot rejects it on an ecosystem
+# that is a member of a multi-ecosystem group, and the rejected prefix left
+# pull request titles as "Bump ...", which fail the conventional-commit check.
 multi-ecosystem-groups:
   all-dependencies:
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
 
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
-    commit-message:
-      prefix: "chore"
-      prefix-development: "chore"
+    # Security updates stay outside the version group. One group per ecosystem
+    # replaces a pull request per advisory.
+    groups:
+      gomod-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
-    commit-message:
-      prefix: "chore"
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
 
   - package-ecosystem: "npm"
     directory: "/web"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
-    commit-message:
-      prefix: "chore"
-      prefix-development: "chore"
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]

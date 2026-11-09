@@ -9,7 +9,7 @@ on:
 permissions:
   contents: write
   packages: write
-  deployments: write   # needed for cloudflare/pages-action to create GitHub Deployment records
+  deployments: write   # wrangler-action records the Pages deployment on the release
 
 jobs:
   release:
@@ -70,17 +70,16 @@ jobs:
           tar -xzf "${{ steps.package.outputs.package_path }}" -C deploy --strip-components=1
           node -e "require('fs').writeFileSync('deploy/config.json', JSON.stringify({api_base_url: process.env.WEB_API_BASE_URL}))"
 
-      # cloudflare/pages-action@v1.5.0 is the latest release; repo is archived, Cloudflare recommends wrangler-action for new use.
+      # pages-action is unpublished. Dependabot aborts the grouped Actions
+      # update when it cannot clone that repository.
       - name: Deploy to Cloudflare Pages
-        uses: cloudflare/pages-action@v1.5.0
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          projectName: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
-          directory: deploy
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          branch: main
-          wranglerVersion: "3"
+          packageManager: npm
+          command: pages deploy deploy --project-name=${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }} --branch=main
 
       # Only the API release workflow may create/publish the shared release.
       - name: Attach frontend package to the gated release

@@ -25,7 +25,7 @@ For the automated Cloudflare Pages deployment to succeed, configure these reposi
 
 The project name is the **exact** name of a **Cloudflare Pages** project shown in the dashboard (Workers & Pages → your **Pages** project). It is case-sensitive and must match what Cloudflare shows—not a GUID. If you see "Project not found" (API error 8000007), the project name or account ID is wrong for the account the token uses.
 
-The workflow uses `cloudflare/pages-action@v1.5.0` (that action’s latest release). The pages-action repo is archived; Cloudflare recommends [wrangler-action](https://github.com/cloudflare/wrangler-action) for new workflows. We use Wrangler v3 via the action’s `wranglerVersion` input to avoid deprecated dependency warnings.
+The workflow deploys with [wrangler-action](https://github.com/cloudflare/wrangler-action). `cloudflare/pages-action` is no longer published, and Dependabot fails the grouped Actions update when it cannot clone that repository.
 
 See [Frontend Deployment](../README.md#frontend-deployment) in the main README for manual build and deployment steps (including other hosts and `config.json` setup).
 
