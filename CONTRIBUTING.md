@@ -37,7 +37,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 ### Prerequisites
 
-- Go 1.27.3 or later
+- Go 1.27.4 or later
 - Node.js 18+ (for frontend development)
 - Git
 - Go quality tools are pinned in `tools/quality/go.mod`; run `make setup`
